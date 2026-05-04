@@ -16,5 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test": "echo 'tests in Phase 5'",
     "clean": "rm -rf .turbo dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@dutyhive/config": "workspace:*"
   }
 }

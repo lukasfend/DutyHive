@@ -1,6 +1,6 @@
 {
   "name": "@dutyhive/web",
-  "version": "0.1.0-foundation.4",
+  "version": "0.1.0-foundation.5",
   "private": true,
   "description": "DutyHive single Next.js app — routes all subdomains via the proxy convention to internal route groups.",
   "scripts": {
@@ -9,8 +9,9 @@
     "start": "next start --port 3000",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'unit/integration tests added in Phase 2/5'",
-    "test:e2e": "echo 'playwright e2e in Phase 5'",
+    "test": "echo 'unit tests live in package workspaces (vitest run from root)'",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
     "clean": "rm -rf .next .turbo *.tsbuildinfo"
   },
   "dependencies": {
@@ -21,8 +22,10 @@
     "@dutyhive/email": "workspace:*",
     "@dutyhive/env": "workspace:*",
     "@dutyhive/i18n": "workspace:*",
+    "@dutyhive/jobs": "workspace:*",
     "@dutyhive/logger": "workspace:*",
     "@dutyhive/ui": "workspace:*",
+    "@sentry/nextjs": "^10.51.0",
     "@tailwindcss/typography": "^0.5.19",
     "marked": "^18.0.3",
     "next": "16.2.4",
@@ -32,6 +35,7 @@
     "zod": "3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "4.2.4",
     "@types/node": "22.10.5",
     "@types/react": "19.0.4",

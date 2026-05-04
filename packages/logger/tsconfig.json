@@ -1,9 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
+  // No rootDir/outDir — consumed by source via Next 16's transpilePackages.
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

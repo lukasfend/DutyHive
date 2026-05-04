@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
+import { withSentryConfig } from '@sentry/nextjs';
 
 /* next-intl plugin wraps the config so server components can call
  * `getTranslations()` and friends. The argument is the path (relative to
@@ -87,4 +88,20 @@ const config: NextConfig = {
   },
 };
 
-export default withNextIntl(config);
+/**
+ * Sentry wraps last so it sees the final, compiled config + plugins.
+ * Source-map upload runs only when SENTRY_AUTH_TOKEN is present (Coolify
+ * provides it in production). When it's missing — local dev, CI without
+ * the token — `silent: true` keeps the build noise-free.
+ */
+export default withSentryConfig(withNextIntl(config), {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: true,
+  disableLogger: true,
+  // Skip the source-map upload step entirely if no auth token is set.
+  // (Sentry's wrapper will warn but build succeeds.)
+  sourcemaps: {
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+  },
+});

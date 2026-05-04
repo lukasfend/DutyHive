@@ -17,6 +17,44 @@
 
 ---
 
+## v0.1.0-foundation.5 — 2026-05-04 — Phase 5: Observability, jobs, PWA scaffold, e2e tests
+
+### Added
+
+- **`@dutyhive/logger` — pino with PII redaction.** Process-wide `logger` instance with structured JSON output in production (Coolify-ingestable) and pretty-printing in dev. Redaction list scrubs known PII paths (`password`, `*.password`, `token`, `*.token`, `cookie`, `authorization`, `email`, `req.headers`, …). `withRequestContext(logger, { requestId, subdomain, userId })` builds a child logger bound to per-request correlation. Request id flows through from `apps/web/proxy.ts`'s `x-dh-request-id` header set in Phase 3.
+- **Sentry server + edge + client.** `apps/web/instrumentation.ts` bootstraps the Node and Edge runtimes; `apps/web/instrumentation-client.ts` initialises the browser SDK. `sentry.server.config.ts` and `sentry.edge.config.ts` mirror each other minimally. `beforeSend` strips request headers, cookies, and user PII before any event leaves the box — defence in depth on top of the logger redaction. EU residency note pinned for the production DSN (Phase 6).
+- **`withSentryConfig`** wraps `next.config.ts`. Source-map upload skipped when `SENTRY_AUTH_TOKEN` is missing so local builds don't fail. `silent: true` keeps build noise down. `disableLogger: true` (Sentry's own debug logger, not `@dutyhive/logger`).
+- **Boot-time mail check.** `instrumentation.ts` calls `assertProductionMailReady()` from `@dutyhive/email` so production refuses to start without `RESEND_API_KEY` (R-0010 mitigation hardened).
+- **`@dutyhive/jobs` Trigger.dev v3 tasks.**
+  - `cleanup-stale-sessions` — daily cron at 04:00 UTC, deletes `Session` rows past `expiresAt`. Logs deletion count + writes a `jobs.session.cleanup` audit row.
+  - `send-welcome-email` — event task with payload `{ userId }`. Renders the verification template (a dedicated welcome template lands when the auth flow triggers it) and sends through `@dutyhive/email`. Failure logs but doesn't retry — Better Auth is independent.
+- **`apps/web/trigger.config.ts`** — Trigger.dev v3 project config. Discovers tasks under `packages/jobs/src/tasks/`. `TRIGGER_PROJECT_REF` env is required in production (Phase 6 setup).
+- **`@dutyhive/pwa` package shape.** `buildManifest({ subdomain, shortName, description, themeColor? })` returns a Web App Manifest object suitable for a Next.js `app/<sub>/manifest.ts` route. `isProductEnabled('planner' | 'business' | 'checklist')` reads `brand.features` so a layout knows whether to register the SW. No service worker registered for any subdomain in Foundation — products opt in by flipping the brand flag and wiring Serwist (post-Foundation, see ADR-0011).
+- **Playwright e2e suite.** 11 tests across 3 files:
+  - `marketing.spec.ts` — hero copy, three product cards, newsletter form, cookie banner regression test (banner must NOT render in Foundation).
+  - `subdomains.spec.ts` — five subdomains route to their own page via `lvh.me`; `/subs/*` direct external request returns 404.
+  - `newsletter.spec.ts` — full double-opt-in flow: submit form → mail in Mailpit → confirm URL → success page.
+    Run with `pnpm --filter @dutyhive/web test:e2e` (after `pnpm test:e2e:install`).
+
+### Changed
+
+- **`apps/web/instrumentation.ts`** rewritten from stub to actual Sentry boot + mail-readiness check + `onRequestError` re-export.
+- **Per-package tsconfig** for `logger`, `jobs`, `pwa` dropped `rootDir`/`outDir` (matching the Phase 2 pattern — packages consumed by source via `transpilePackages`).
+
+### Verification
+
+`pnpm typecheck` 12/12 ✓ · `pnpm lint` 12/12 ✓ · `pnpm test` 13/13 ✓ · `pnpm check:rls` ✓ · dev-server boot clean (Sentry's only deprecation warning is benign) · all five subdomains still route correctly · `/api/auth/get-session` returns 200, `/subs/marketing` external request returns 404 · `playwright test --list` registers 11 tests.
+
+### Known follow-ups (Phase 6+)
+
+- Real Sentry project + DSN created and wired via Coolify env (Phase 6 / Hetzner runbook).
+- Trigger.dev project ref + secret key wired (Phase 6).
+- Auth-side trigger for `send-welcome-email` (after `emailVerification.afterVerification`) lands when we add the welcome template.
+- `pnpm test:e2e` not yet enforced in CI — manual run before each tag.
+- Sentry's `disableLogger` deprecation: switch to `webpack.treeshake.removeDebugLogging` in a future SDK upgrade (only surfaces with Webpack — Foundation runs Turbopack which ignores it).
+
+---
+
 ## v0.1.0-foundation.4 — 2026-05-04 — Phase 4: Marketing site, newsletter, legal pages
 
 ### Added

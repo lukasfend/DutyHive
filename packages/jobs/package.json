@@ -14,5 +14,13 @@
     "typecheck": "tsc --noEmit",
     "test": "echo 'tests in Phase 5'",
     "clean": "rm -rf .turbo dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@dutyhive/audit": "workspace:*",
+    "@dutyhive/db": "workspace:*",
+    "@dutyhive/email": "workspace:*",
+    "@dutyhive/env": "workspace:*",
+    "@dutyhive/logger": "workspace:*",
+    "@trigger.dev/sdk": "^4.4.5"
   }
 }
