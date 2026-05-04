@@ -1,0 +1,26 @@
+# Build outputs and dependencies
+node_modules/
+.pnpm-store/
+.next/
+.turbo/
+dist/
+build/
+out/
+coverage/
+
+# Generated
+*.tsbuildinfo
+next-env.d.ts
+pnpm-lock.yaml
+
+# Prisma generated
+packages/db/prisma/migrations/
+
+# Lockfiles handled by their own tooling
+package-lock.json
+yarn.lock
+
+# Logs and reports
+*.log
+playwright-report/
+test-results/

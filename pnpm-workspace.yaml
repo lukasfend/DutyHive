@@ -1,0 +1,5 @@
+# DutyHive — pnpm workspaces
+# Every folder under apps/ and packages/ that has a package.json becomes a workspace member.
+packages:
+  - 'apps/*'
+  - 'packages/*'

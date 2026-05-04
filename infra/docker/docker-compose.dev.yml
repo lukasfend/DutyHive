@@ -1,0 +1,35 @@
+# DutyHive — local dev stack.
+#
+# Run from repo root:
+#   docker compose -f infra/docker/docker-compose.dev.yml up -d
+#
+# Phase 1 stub: Postgres only. Phase 2 adds extension-bootstrap and RLS roles.
+# Phase 4 will add mailpit. Phase 5/6 adds minio for S3 emulation.
+#
+# Volumes are named so they survive `docker compose down`. Use `down -v` to nuke.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: dutyhive_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dutyhive
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: dutyhive_dev
+      # German collation for locale-correct sorting in dev mirroring prod expectations.
+      LANG: C.UTF-8
+    ports:
+      - '5432:5432'
+    volumes:
+      - dh_pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'dutyhive', '-d', 'dutyhive_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  dh_pgdata:
+    name: dutyhive_pgdata

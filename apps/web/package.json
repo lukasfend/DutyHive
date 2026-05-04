@@ -1,0 +1,36 @@
+{
+  "name": "@dutyhive/web",
+  "version": "0.1.0-foundation.0",
+  "private": true,
+  "description": "DutyHive single Next.js app — routes all subdomains via the proxy convention to internal route groups.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'unit/integration tests added in Phase 2/5'",
+    "test:e2e": "echo 'playwright e2e in Phase 5'",
+    "clean": "rm -rf .next .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@dutyhive/config": "workspace:*",
+    "@dutyhive/env": "workspace:*",
+    "@dutyhive/logger": "workspace:*",
+    "next": "16.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.4",
+    "@types/node": "22.10.5",
+    "@types/react": "19.0.4",
+    "@types/react-dom": "19.0.2",
+    "eslint": "9.18.0",
+    "eslint-config-next": "16.2.4",
+    "postcss": "8.5.0",
+    "tailwindcss": "4.2.4",
+    "typescript": "5.7.3"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "plugins": [{ "name": "next" }],
+    "jsx": "preserve",
+    "incremental": true,
+    "noEmit": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "Bundler",
+    "isolatedModules": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@dutyhive/config": ["../../packages/config/src/index.ts"],
+      "@dutyhive/config/*": ["../../packages/config/src/*"],
+      "@dutyhive/env": ["../../packages/env/src/index.ts"],
+      "@dutyhive/env/*": ["../../packages/env/src/*"],
+      "@dutyhive/logger": ["../../packages/logger/src/index.ts"],
+      "@dutyhive/db": ["../../packages/db/src/index.ts"],
+      "@dutyhive/auth": ["../../packages/auth/src/index.ts"],
+      "@dutyhive/auth/*": ["../../packages/auth/src/*"],
+      "@dutyhive/audit": ["../../packages/audit/src/index.ts"],
+      "@dutyhive/i18n": ["../../packages/i18n/src/index.ts"],
+      "@dutyhive/i18n/*": ["../../packages/i18n/src/*"],
+      "@dutyhive/ui": ["../../packages/ui/src/index.ts"],
+      "@dutyhive/ui/*": ["../../packages/ui/src/*"],
+      "@dutyhive/email": ["../../packages/email/src/index.ts"],
+      "@dutyhive/email/*": ["../../packages/email/src/*"],
+      "@dutyhive/jobs": ["../../packages/jobs/src/index.ts"],
+      "@dutyhive/pwa": ["../../packages/pwa/src/index.ts"],
+      "@dutyhive/pwa/*": ["../../packages/pwa/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next"]
+}

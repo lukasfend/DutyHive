@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "Prisma.prisma",
+    "EditorConfig.EditorConfig",
+    "ms-azuretools.vscode-docker",
+    "yoavbls.pretty-ts-errors",
+    "stivo.tailwind-fold",
+    "wayou.vscode-todo-highlight"
+  ]
+}
