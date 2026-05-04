@@ -63,13 +63,35 @@ If you've never done this before: **6–10 hours** spread over 1–2 days. Most 
 - An active **Cloudflare** account (free tier — `https://dash.cloudflare.com`).
 - Login access to the **Vercel Registrar** dashboard for `dutyhive.com`.
 - An active **Resend** account (free tier — `https://resend.com`).
-- A local terminal with `ssh`, `ssh-keygen`, `curl`, `dig`, `gpg`, and a text editor.
 - The DutyHive repo cloned locally.
 - A password manager (1Password, Bitwarden, KeePass) — every secret you generate goes in here, never in plain files.
 
+#### Local toolchain
+
+| Tool                       | Why                                  | Linux / macOS                        | Windows                                                                 |
+| -------------------------- | ------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------- |
+| `ssh`, `ssh-keygen`, `scp` | Connect to and copy files to the VPS | OpenSSH preinstalled                 | OpenSSH client preinstalled on Windows 10/11 (verify: `ssh -V`)         |
+| `curl`                     | API calls, downloads                 | preinstalled                         | preinstalled as `curl.exe` since Windows 10 1803                        |
+| DNS lookup                 | Verify nameservers + records         | `dig` (`brew install bind` on macOS) | `Resolve-DnsName` (built-in PowerShell) or `nslookup`                   |
+| `gpg`                      | Encrypt backups                      | `brew install gnupg` / `apt install` | `winget install GnuPG.Gpg4win` or `choco install gpg4win`               |
+| `openssl`                  | Random secret generation             | preinstalled                         | Comes with Git for Windows; or `winget install ShiningLight.OpenSSL`    |
+| `tar`                      | Extract archives                     | preinstalled                         | preinstalled as `tar.exe` since Windows 10 1803                         |
+| `psql`                     | Restore-drill on the local box       | PostgreSQL client package            | `winget install PostgreSQL.PostgreSQL` (client only OK)                 |
+| Hetzner CLI (optional)     | Re-runnable provisioning             | `brew install hcloud`                | `winget install Hetzner.hcloud` or download binary from GitHub releases |
+| `pnpm` 10                  | Run repo scripts                     | `corepack enable pnpm`               | `corepack enable pnpm` (Node 22 required)                               |
+
+On Windows we recommend doing this work from one of these terminals:
+
+- **PowerShell 7** (`pwsh`) — the conventions table below shows PowerShell variants on `local-ps>` lines whenever syntax differs from POSIX shells.
+- **Git Bash** that ships with Git for Windows — accepts every `local$` line verbatim.
+- **WSL2 (Ubuntu)** — the most painless option; treat it as Linux throughout.
+
+If you pick PowerShell, run `Start-Service ssh-agent` once before the first `ssh-add` and re-run it on each new shell session (or set the service to `Automatic`).
+
 ### Conventions used in this guide
 
-- Commands prefixed with `local$` run on **your laptop**.
+- Commands prefixed with `local$` run on **your laptop** in a POSIX shell (Linux, macOS, WSL, Git Bash).
+- Commands prefixed with `local-ps>` are the **Windows PowerShell** equivalent and only appear when the POSIX line doesn't work as-is.
 - Commands prefixed with `mgmt$`, `app$`, `db$` run on **that specific VPS** as a non-root user.
 - Commands prefixed with `mgmt#`, `app#`, `db#` run on that VPS as **root** (via `sudo -i` after the initial root login).
 - Replace `<…>` placeholders with real values before pasting.
@@ -92,15 +114,25 @@ Pick a passphrase **different from your laptop login password** and store it in 
 local$ ssh-keygen -t ed25519 -C "dutyhive-admin@<your-email>" -f ~/.ssh/dutyhive_admin_ed25519
 ```
 
+```powershell
+local-ps> ssh-keygen -t ed25519 -C "dutyhive-admin@<your-email>" -f $HOME\.ssh\dutyhive_admin_ed25519
+```
+
 This produces:
 
-- `~/.ssh/dutyhive_admin_ed25519` — private key, **never share**
-- `~/.ssh/dutyhive_admin_ed25519.pub` — public key, OK to upload
+- `~/.ssh/dutyhive_admin_ed25519` (POSIX) / `$HOME\.ssh\dutyhive_admin_ed25519` (Windows) — private key, **never share**
+- the matching `.pub` file — public key, OK to upload
 
 Add the key to your local agent so subsequent `ssh` calls use it without re-typing the passphrase:
 
 ```bash
 local$ ssh-add ~/.ssh/dutyhive_admin_ed25519
+```
+
+```powershell
+local-ps> Get-Service ssh-agent | Set-Service -StartupType Automatic
+local-ps> Start-Service ssh-agent
+local-ps> ssh-add $HOME\.ssh\dutyhive_admin_ed25519
 ```
 
 ### A.3 Upload the public key to Hetzner
@@ -121,6 +153,13 @@ local$ brew install hcloud
 # Linux (download binary from https://github.com/hetznercloud/cli/releases)
 local$ curl -L https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar xz
 local$ sudo mv hcloud /usr/local/bin/
+```
+
+```powershell
+# Windows
+local-ps> winget install Hetzner.hcloud
+# Or manually: download hcloud-windows-amd64.zip from the Releases page,
+# extract, and place hcloud.exe somewhere on $env:Path.
 ```
 
 Generate an API token in **Security → API Tokens → Generate API Token** (read+write), then:
@@ -144,6 +183,10 @@ We'll lock SSH ingress to your IP only.
 local$ curl -s https://api.ipify.org
 ```
 
+```powershell
+local-ps> Invoke-RestMethod https://api.ipify.org
+```
+
 Note the IPv4 address. If your ISP gives you a dynamic IP, you'll have to update the firewall rule when it changes — keep the IP detection command handy.
 
 ### B.2 Create the Private Network
@@ -152,11 +195,11 @@ Hetzner's **Cloud Network** lets the three VPS talk over a 10.x.x.x subnet witho
 
 1. Hetzner Console → **Networks → Create Network**.
 2. **Name**: `dutyhive-internal`.
-3. **IP range**: `10.10.0.0/16`.
+3. **IP range**: `10.0.0.0/16`.
 4. **Add subnet**:
    - **Type**: Cloud
    - **Network zone**: `eu-central` (Falkenstein FSN1).
-   - **IP range**: `10.10.1.0/24`.
+   - **IP range**: `10.0.1.0/24`.
 5. Save.
 
 You'll attach each VPS to this network in Phase C.
@@ -196,7 +239,7 @@ Order in this sequence: `mgmt-01` first (we'll bootstrap from it), then `app-01`
 5. **Networking**:
    - Public IPv4: ✓
    - Public IPv6: ✓
-   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (likely `10.10.1.2`).
+   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (likely `10.0.1.2`).
 6. **SSH keys**: select `dutyhive-admin`.
 7. **Volumes**: none.
 8. **Firewalls**: select `dutyhive-edge`.
@@ -214,7 +257,7 @@ Note the assigned **public IPv4** in the server details page. You'll use it as `
 Same as C.1 with these differences:
 
 - **Type**: shared vCPU **AMD** → **CPX21** (3 vCPU, 4 GB RAM, 80 GB disk).
-- Note the private IP (likely `10.10.1.3`).
+- Note the private IP (likely `10.0.1.3`).
 - **Backups**: enabled.
 - **Labels**: `role=app`, `env=prod`.
 - **Name**: `app-01`.
@@ -226,7 +269,7 @@ Note its public IPv4 as `<APP_PUBLIC_IP>`.
 Same as C.1 with these differences:
 
 - **Type**: shared vCPU **AMD** → **CPX21**.
-- Private IP (likely `10.10.1.4`).
+- Private IP (likely `10.0.1.4`).
 - **Backups**: enabled (this is the box you most want backed up).
 - **Labels**: `role=db`, `env=prod`.
 - **Name**: `db-01`.
@@ -247,8 +290,8 @@ While logged in to each box, verify the private network is up:
 
 ```bash
 mgmt#  ip -4 addr show enp7s0     # or `ip addr show` to see all interfaces
-mgmt#  ping -c 2 10.10.1.3        # should reach app-01
-mgmt#  ping -c 2 10.10.1.4        # should reach db-01
+mgmt#  ping -c 2 10.0.1.3        # should reach app-01
+mgmt#  ping -c 2 10.0.1.4        # should reach db-01
 ```
 
 If `ping` fails, the Private Network attachment didn't go through — re-check the server's Network tab in Hetzner Console.
@@ -327,7 +370,7 @@ mgmt$ sudo ufw allow OpenSSH
 mgmt$ sudo ufw allow 80/tcp
 mgmt$ sudo ufw allow 443/tcp
 # Allow private-network traffic so mgmt-01 can SSH to app-01/db-01:
-mgmt$ sudo ufw allow from 10.10.1.0/24
+mgmt$ sudo ufw allow from 10.0.1.0/24
 mgmt$ sudo ufw enable                  # type 'y' to confirm
 mgmt$ sudo ufw status verbose
 ```
@@ -335,7 +378,7 @@ mgmt$ sudo ufw status verbose
 On `app-01` and `db-01`, identical, plus on `db-01` allow Postgres only on the private network:
 
 ```bash
-db$  sudo ufw allow from 10.10.1.0/24 to any port 5432 proto tcp
+db$  sudo ufw allow from 10.0.1.0/24 to any port 5432 proto tcp
 ```
 
 ### D.5 Fail2ban (default `sshd` jail is enabled by package)
@@ -386,6 +429,10 @@ Use a separate key from the admin key so a compromised app server can't triviall
 local$ ssh-keygen -t ed25519 -C "dutyhive-backups@<host>" -f ~/.ssh/dutyhive_backup_ed25519 -N ""
 ```
 
+```powershell
+local-ps> ssh-keygen -t ed25519 -C "dutyhive-backups@<host>" -f $HOME\.ssh\dutyhive_backup_ed25519 -N '""'
+```
+
 (Empty passphrase: this key lives on `db-01` and runs unattended. The Storage Box itself enforces username scope.)
 
 Add the public key in **Storage Box → SSH Keys → Add public key**.
@@ -421,10 +468,10 @@ db$  sudo apt install -y postgresql-17 postgresql-contrib-17
 
 ### F.2 Bind Postgres to the private network only
 
-Get `db-01`'s private IP (should be `10.10.1.4`):
+Get `db-01`'s private IP (should be `10.0.1.4`):
 
 ```bash
-db$  ip -4 addr show | grep '10.10.'
+db$  ip -4 addr show | grep '10.0.'
 ```
 
 Edit `/etc/postgresql/17/main/postgresql.conf`:
@@ -436,7 +483,7 @@ db$  sudo vim /etc/postgresql/17/main/postgresql.conf
 Change:
 
 ```conf
-listen_addresses = '10.10.1.4'         # private IP of db-01 — never set to '*'
+listen_addresses = '10.0.1.4'         # private IP of db-01 — never set to '*'
 port = 5432
 ssl = on
 ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'      # snakeoil first; replace in F.5
@@ -457,8 +504,8 @@ db$  sudo vim /etc/postgresql/17/main/pg_hba.conf
 # TYPE  DATABASE          USER              ADDRESS         METHOD
 local   all               postgres                          peer
 local   all               all                               peer
-hostssl all               all               10.10.1.3/32    scram-sha-256
-hostssl replication       all               10.10.1.3/32    scram-sha-256
+hostssl all               all               10.0.1.3/32    scram-sha-256
+hostssl replication       all               10.0.1.3/32    scram-sha-256
 # Reject any other host explicitly so a misconfigured listen_addresses can't leak.
 host    all               all               0.0.0.0/0       reject
 host    all               all               ::/0            reject
@@ -469,7 +516,7 @@ Reload Postgres:
 ```bash
 db$  sudo systemctl restart postgresql@17-main
 db$  sudo -u postgres psql -c "SHOW listen_addresses;"
-db$  sudo ss -tlnp | grep 5432       # confirm only 10.10.1.4:5432 is listening
+db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.1.4:5432 is listening
 ```
 
 ### F.4 Create roles + database + extensions
@@ -553,7 +600,7 @@ The connection string used by the app will set `?sslmode=verify-full&sslrootcert
 ```bash
 app$  sudo apt install -y postgresql-client-17
 app$  PGPASSWORD='<APP_DB_PASSWORD>' psql \
-        "host=10.10.1.4 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
+        "host=10.0.1.4 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
         -c "SELECT current_user, current_database();"
 # expected output:
 #  current_user   | current_database
@@ -576,7 +623,7 @@ But `db-01` is **not** publicly reachable on 5432 — that's the point. Two ways
 
 1. **SSH-tunnel from your laptop via mgmt-01** (recommended for the first deploy):
    ```bash
-   local$ ssh -L 5432:10.10.1.4:5432 deploy@<MGMT_PUBLIC_IP>
+   local$ ssh -L 5432:10.0.1.4:5432 deploy@<MGMT_PUBLIC_IP>
    # in another terminal:
    local$ MIGRATE_DATABASE_URL="postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require" \
             pnpm --filter @dutyhive/db exec prisma migrate deploy
@@ -653,7 +700,7 @@ In Coolify UI:
 
 1. **Servers → Add Server**.
 2. **Name**: `app-01`.
-3. **IP**: `10.10.1.3` (private — Coolify connects over the internal network).
+3. **IP**: `10.0.1.3` (private — Coolify connects over the internal network).
 4. **User**: `deploy`.
 5. **Port**: `22`.
 6. **SSH key**: select the `app-01-key` Coolify just generated.
@@ -695,12 +742,18 @@ Generate a fresh `BETTER_AUTH_SECRET`:
 local$ openssl rand -base64 48
 ```
 
+```powershell
+# If openssl.exe is on $env:Path (ships with Git for Windows), the line above works.
+# Otherwise use Node, which the dev toolchain already requires:
+local-ps> node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+```
+
 Paste these into Coolify's environment-variable form (each as a separate row):
 
 ```env
 NODE_ENV=production
-DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.10.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
-MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.10.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.0.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.0.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
 BETTER_AUTH_SECRET=<paste-from-openssl-rand>
 BETTER_AUTH_URL=https://app.dutyhive.com
 NEXT_PUBLIC_ROOT_DOMAIN=dutyhive.com
@@ -783,6 +836,12 @@ local$ dig +short app.dutyhive.com     # same
 local$ dig NS dutyhive.com +short      # expect the Cloudflare nameservers
 ```
 
+```powershell
+local-ps> Resolve-DnsName dutyhive.com -Type A      | Select-Object -ExpandProperty IPAddress
+local-ps> Resolve-DnsName app.dutyhive.com -Type A  | Select-Object -ExpandProperty IPAddress
+local-ps> Resolve-DnsName dutyhive.com -Type NS     | Select-Object -ExpandProperty NameHost
+```
+
 ### H.5 Trigger TLS issuance
 
 In Coolify → application → **Deploy**. Once the build finishes and Coolify's Caddy starts, it'll auto-request Let's Encrypt certs for every domain mapped in G.6. Watch the deploy log:
@@ -845,6 +904,13 @@ local$ curl -X POST https://api.resend.com/emails \
   -H "Authorization: Bearer <RESEND_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"from":"noreply@dutyhive.com","to":"<your personal mail>","subject":"DutyHive — domain verification test","html":"It works."}'
+```
+
+```powershell
+local-ps> Invoke-RestMethod -Method POST `
+  -Uri "https://api.resend.com/emails" `
+  -Headers @{ Authorization = "Bearer <RESEND_API_KEY>"; "Content-Type" = "application/json" } `
+  -Body '{"from":"noreply@dutyhive.com","to":"<your personal mail>","subject":"DutyHive — domain verification test","html":"It works."}'
 ```
 
 Check the recipient inbox. Then run the message through `https://www.mail-tester.com` — score should be **9/10 or 10/10** with SPF + DKIM + DMARC all green.
@@ -932,7 +998,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.10.1.2:8090 --token <TOKEN_FROM_HUB>
+ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.0.1.2:8090 --token <TOKEN_FROM_HUB>
 Restart=on-failure
 
 [Install]
@@ -973,6 +1039,10 @@ db$    gpg --import /tmp/dutyhive-backups-public.asc
 db$    gpg --list-keys
 ```
 
+```powershell
+local-ps> scp .\dutyhive-backups-public.asc deploy@<DB_PUBLIC_IP>:/tmp/
+```
+
 ### L.2 Configure SSH to the Storage Box from `db-01`
 
 Copy the backup key from E.2 to `db-01`:
@@ -980,6 +1050,10 @@ Copy the backup key from E.2 to `db-01`:
 ```bash
 local$ scp ~/.ssh/dutyhive_backup_ed25519 deploy@<DB_PUBLIC_IP>:/home/deploy/.ssh/
 db$    chmod 600 /home/deploy/.ssh/dutyhive_backup_ed25519
+```
+
+```powershell
+local-ps> scp $HOME\.ssh\dutyhive_backup_ed25519 deploy@<DB_PUBLIC_IP>:/home/deploy/.ssh/
 ```
 
 Append a host alias to `~/.ssh/config`:
@@ -1079,6 +1153,16 @@ local$ gpg --decrypt <latest>.sql.gz.gpg | gunzip | psql -h localhost -U postgre
 local$ psql -h localhost -U postgres dutyhive_restore_test -c "SELECT count(*) FROM \"user\";"
 ```
 
+```powershell
+# PowerShell can't pipe binary streams cleanly between gpg and psql. Decrypt
+# to a file first, then feed it into psql.
+local-ps> scp deploy@<DB_PUBLIC_IP>:/tmp/<latest>.sql.gz.gpg .
+local-ps> gpg --decrypt --output dump.sql.gz <latest>.sql.gz.gpg
+local-ps> & 'C:\Program Files\Git\usr\bin\gzip.exe' -d dump.sql.gz   # or use 7z
+local-ps> psql -h localhost -U postgres dutyhive_restore_test -f dump.sql
+local-ps> psql -h localhost -U postgres dutyhive_restore_test -c 'SELECT count(*) FROM "user";'
+```
+
 If row counts match production: backups are real. Document the drill date in `docs/guides/release-checklist.md`.
 
 ### L.6 Coolify config backup (weekly)
@@ -1147,7 +1231,7 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 - [ ] `fail2ban` jail `sshd` is active on all three VPS.
 - [ ] UFW is enabled on all three VPS with the rules from D.4.
 - [ ] Postgres `listen_addresses` is the private IP only (not `*`).
-- [ ] `pg_hba.conf` allows only `10.10.1.3/32` (app-01) — no `0.0.0.0/0`.
+- [ ] `pg_hba.conf` allows only `10.0.1.3/32` (app-01) — no `0.0.0.0/0`.
 - [ ] Hetzner Cloud Firewall has SSH locked to your home IP.
 
 ### Compliance
@@ -1172,7 +1256,7 @@ local$ git push origin main
 ### Routine: apply a Prisma migration to production
 
 ```bash
-local$ ssh -L 5432:10.10.1.4:5432 deploy@<MGMT_PUBLIC_IP>
+local$ ssh -L 5432:10.0.1.4:5432 deploy@<MGMT_PUBLIC_IP>
 # in another terminal:
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require' \
          pnpm --filter @dutyhive/db exec prisma migrate deploy
@@ -1188,8 +1272,8 @@ Hetzner Cloud Firewall has a "Servers with this firewall" view — temporarily w
 
 ```bash
 local$ ssh deploy@<MGMT_PUBLIC_IP>
-mgmt$  ping 10.10.1.4                      # private network up?
-mgmt$  ssh deploy@10.10.1.4                # SSH via private net
+mgmt$  ping 10.0.1.4                      # private network up?
+mgmt$  ssh deploy@10.0.1.4                # SSH via private net
 db$    sudo systemctl status postgresql@17-main
 db$    sudo journalctl -u postgresql@17-main -n 100
 ```
