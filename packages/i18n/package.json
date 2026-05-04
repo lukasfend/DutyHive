@@ -9,12 +9,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
-    "./request": "./src/request.ts"
+    "./messages/de": "./src/messages/de.json",
+    "./messages/en": "./src/messages/en.json"
   },
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit",
     "test": "echo 'tests in Phase 3'",
     "clean": "rm -rf .turbo dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "next-intl": "^4.11.0"
   }
 }

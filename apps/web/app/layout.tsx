@@ -1,14 +1,18 @@
 import type { Metadata, Viewport } from 'next';
+import { NextIntlClientProvider } from 'next-intl';
+import { getLocale, getMessages } from 'next-intl/server';
 import { brand } from '@dutyhive/config';
 import './globals.css';
 
 /**
  * Root layout — applies to every route group.
  *
- * Phase 3 will introduce per-subdomain shells under app/_sub/[sub]/layout.tsx
- * that wrap children with subdomain-specific navigation and theme.
+ * Wraps the tree with `<NextIntlClientProvider>` so client components can
+ * call `useTranslations()`. The locale + messages are resolved server-side
+ * by `next-intl/server` from the request-config plugin in next.config.ts.
  *
- * `lang` is set to 'de' since DE is the only translated locale in Foundation.
+ * Per-subdomain layouts under `app/subs/<sub>/layout.tsx` add their own
+ * chrome (header, nav, footer) on top of this root.
  */
 export const metadata: Metadata = {
   title: {
@@ -37,10 +41,17 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="de" suppressHydrationWarning>
-      <body>{children}</body>
+    <html lang={locale} suppressHydrationWarning>
+      <body>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          {children}
+        </NextIntlClientProvider>
+      </body>
     </html>
   );
 }

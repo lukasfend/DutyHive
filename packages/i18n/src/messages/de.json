@@ -1,0 +1,59 @@
+{
+  "common": {
+    "brand": "DutyHive",
+    "comingSoon": "Demnächst verfügbar.",
+    "back": "Zurück",
+    "loading": "Lädt …"
+  },
+  "marketing": {
+    "tagline": "Werkzeuge für Schichtarbeit im Gesundheitswesen.",
+    "preAlphaBadge": "Foundation Pre-Alpha",
+    "signInLink": "Anmelden",
+    "products": {
+      "planner": {
+        "title": "Planner",
+        "description": "Persönlicher Schichtplaner. ICS-Export, PWA, kostenlos."
+      },
+      "business": {
+        "title": "Business",
+        "description": "Mitarbeiter und Dienstpläne für Gesundheitsbetriebe."
+      },
+      "checklist": {
+        "title": "Checklists",
+        "description": "Konfigurierbare Checklisten mit Audit-Trail."
+      }
+    },
+    "footer": {
+      "rightsReserved": "Alle Rechte vorbehalten.",
+      "imprint": "Impressum",
+      "privacy": "Datenschutz",
+      "terms": "AGB"
+    }
+  },
+  "account": {
+    "title": "Konto-Zentrale",
+    "description": "Hier melden Sie sich an, verwalten Ihr Profil und wechseln zwischen Organisationen.",
+    "signIn": "Anmelden",
+    "signUp": "Konto erstellen",
+    "phaseNote": "Foundation Phase 3 · Login-Formulare in Phase 4"
+  },
+  "products": {
+    "planner": {
+      "shellTitle": "Planner — demnächst",
+      "shellDescription": "Persönlicher Schichtplaner mit ICS-Export und PWA-Support. Wir bauen die Plattform gerade fertig."
+    },
+    "business": {
+      "shellTitle": "Business — demnächst",
+      "shellDescription": "Mitarbeiter- und Dienstplanverwaltung für Gesundheitsbetriebe."
+    },
+    "checklist": {
+      "shellTitle": "Checklists — demnächst",
+      "shellDescription": "Konfigurierbare Checklisten mit lückenlosem Audit-Trail."
+    }
+  },
+  "errors": {
+    "unauthorized": "Bitte melden Sie sich an.",
+    "notFound": "Seite nicht gefunden.",
+    "internal": "Interner Fehler. Bitte versuchen Sie es erneut."
+  }
+}

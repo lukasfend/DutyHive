@@ -1,0 +1,34 @@
+/* DutyHive global base styles. Imported by apps/web's app/globals.css after
+ * the token file. Keeps cross-cutting concerns (focus-visible style, base
+ * font size, body background) consistent across all subdomains. */
+
+@import './tokens.css';
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      'Helvetica Neue',
+      Arial,
+      'Liberation Sans',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+}

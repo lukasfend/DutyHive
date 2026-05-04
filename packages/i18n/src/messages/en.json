@@ -1,0 +1,59 @@
+{
+  "common": {
+    "brand": "DutyHive",
+    "comingSoon": "__EN_TODO__ Coming soon.",
+    "back": "__EN_TODO__ Back",
+    "loading": "__EN_TODO__ Loading …"
+  },
+  "marketing": {
+    "tagline": "__EN_TODO__ Tools for shift work in healthcare.",
+    "preAlphaBadge": "__EN_TODO__ Foundation pre-alpha",
+    "signInLink": "__EN_TODO__ Sign in",
+    "products": {
+      "planner": {
+        "title": "__EN_TODO__ Planner",
+        "description": "__EN_TODO__ Personal shift planner. ICS export, PWA, free."
+      },
+      "business": {
+        "title": "__EN_TODO__ Business",
+        "description": "__EN_TODO__ Staff and shift plans for healthcare operations."
+      },
+      "checklist": {
+        "title": "__EN_TODO__ Checklists",
+        "description": "__EN_TODO__ Configurable checklists with audit trail."
+      }
+    },
+    "footer": {
+      "rightsReserved": "__EN_TODO__ All rights reserved.",
+      "imprint": "__EN_TODO__ Imprint",
+      "privacy": "__EN_TODO__ Privacy",
+      "terms": "__EN_TODO__ Terms"
+    }
+  },
+  "account": {
+    "title": "__EN_TODO__ Account hub",
+    "description": "__EN_TODO__ Sign in, manage your profile, switch between organizations.",
+    "signIn": "__EN_TODO__ Sign in",
+    "signUp": "__EN_TODO__ Create account",
+    "phaseNote": "__EN_TODO__ Foundation phase 3 — sign-in forms land in phase 4"
+  },
+  "products": {
+    "planner": {
+      "shellTitle": "__EN_TODO__ Planner — coming soon",
+      "shellDescription": "__EN_TODO__ Personal shift planner with ICS export and PWA support."
+    },
+    "business": {
+      "shellTitle": "__EN_TODO__ Business — coming soon",
+      "shellDescription": "__EN_TODO__ Staff and shift management for healthcare operations."
+    },
+    "checklist": {
+      "shellTitle": "__EN_TODO__ Checklists — coming soon",
+      "shellDescription": "__EN_TODO__ Configurable checklists with a tamper-evident audit trail."
+    }
+  },
+  "errors": {
+    "unauthorized": "__EN_TODO__ Please sign in.",
+    "notFound": "__EN_TODO__ Page not found.",
+    "internal": "__EN_TODO__ Internal error. Please try again."
+  }
+}

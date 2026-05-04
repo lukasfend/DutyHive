@@ -1,11 +1,24 @@
 /**
- * @dutyhive/ui — Foundation Phase 3:
- *   - components/ — shadcn primitives generated here, not in apps/web
- *   - styles/tokens.css — CSS variables for color/spacing/radius (light + dark)
- *   - styles/globals.css — Tailwind 4 imports + token import + base resets
- *   - theme/provider.tsx — next-themes wrapper
+ * @dutyhive/ui — public surface.
  *
- * Design-tokens-only rule: no hex/oklch values outside tokens.css. Enforced via review.
+ * CSS tokens are imported separately via `@dutyhive/ui/styles/globals.css`
+ * (which transitively pulls tokens.css through @import). Components are
+ * tree-shakable; importing one does not pull the others.
+ *
+ * Design-tokens-only rule: no hex/OKLCH literals outside `styles/tokens.css`.
+ * Components reference the design system via Tailwind classes that map onto
+ * those tokens (`bg-brand-500`, `text-[color:var(--color-fg)]`, etc.).
  */
+export { cn } from './lib/cn';
 
-export const FOUNDATION_PHASE_NOTE = 'Phase 3 wires shadcn + design tokens + theme provider.';
+export { Button, buttonStyles, type ButtonProps } from './components/button';
+export {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from './components/card';
+export { Input, type InputProps } from './components/input';
+export { Label, type LabelProps } from './components/label';

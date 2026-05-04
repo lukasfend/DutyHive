@@ -1,4 +1,10 @@
 import type { NextConfig } from 'next';
+import createNextIntlPlugin from 'next-intl/plugin';
+
+/* next-intl plugin wraps the config so server components can call
+ * `getTranslations()` and friends. The argument is the path (relative to
+ * the project root, i.e. apps/web) to a file exporting the request config. */
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 /**
  * DutyHive — single Next.js app routing all subdomains.
@@ -71,4 +77,4 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+export default withNextIntl(config);

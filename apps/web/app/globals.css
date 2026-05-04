@@ -1,33 +1,9 @@
-/* DutyHive — global styles.
+/* DutyHive — apps/web global stylesheet.
  *
- * Phase 1 keeps this minimal. Phase 3 moves design tokens to
- * @dutyhive/ui/styles/tokens.css and imports them here.
+ * The full design system lives in @dutyhive/ui/styles. We import the global
+ * stylesheet here once at the App Router root and rely on its transitive
+ * `@import './tokens.css'` to set up `@theme` colors, radii, and base
+ * styles. No tokens are defined inline here — that single-source-of-truth
+ * rule is enforced by code review (see packages/ui/src/styles/tokens.css).
  */
-@import 'tailwindcss';
-
-@theme {
-  /* Provisional brand palette — replaced when final branding lands. */
-  --color-brand-50: oklch(0.98 0.02 80);
-  --color-brand-100: oklch(0.95 0.04 80);
-  --color-brand-500: oklch(0.65 0.15 80);
-  --color-brand-700: oklch(0.45 0.13 80);
-  --color-brand-900: oklch(0.25 0.1 80);
-
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-}
-
-html,
-body {
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
-    sans-serif;
-}
-
-body {
-  background: white;
-  color: #111;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+@import '@dutyhive/ui/styles/globals.css';

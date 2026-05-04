@@ -17,6 +17,37 @@
 
 ---
 
+## v0.1.0-foundation.3 — 2026-05-04 — Phase 3: Subdomain routing, UI, i18n
+
+### Added
+
+- **Subdomain routing.** `apps/web/proxy.ts` (Next 16's renamed middleware) reads the `Host` header on every request, resolves it via `@dutyhive/config/subdomains.resolveSubdomain`, and rewrites the URL to `/subs/<sub>/<path>`. The dispatch tree under `apps/web/app/subs/<sub>/` serves five subdomains: marketing (apex), account (`app.`), planner, business, checklist. Direct external `/subs/*` requests are refused with 404.
+- **`@dutyhive/ui` shadcn-style primitives.** `Button` (5 variants × 4 sizes via `class-variance-authority`), `Card` family (`Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`), `Input`, `Label`. All driven by the design tokens in `packages/ui/src/styles/tokens.css` (Tailwind 4 `@theme` directive). Brand scale aliased to Tailwind blue for now — swap to designer OKLCH when assets land.
+- **Theme tokens.** `--color-brand-*`, `--color-bg`, `--color-fg`, `--color-muted`, `--color-border`, `--color-card`, `--color-card-fg`, semantic `--color-success/warn/danger/info`, radius tokens. Dark-theme overrides scoped to `.dark` class on `<html>` (UI toggle deferred).
+- **Per-subdomain layouts.** Marketing has a brand-link nav + footer with legal-page links. Account has sign-in/sign-up nav. Product shells (planner/business/checklist) have a minimal "back to apex" header.
+- **`@dutyhive/i18n` with next-intl.** German (DE) message catalogue + English (EN) stub catalogue (every value prefixed `__EN_TODO__`). `requestConfig` exported from `@dutyhive/i18n/config`; apps/web wires it via `createNextIntlPlugin('./i18n/request.ts')`. Locale hard-coded to DE in Foundation — cookie/header detection lands in Phase 4. URL-based locale routing intentionally off.
+- **Marketing landing copy** sourced through `getTranslations('marketing')`.
+
+### Changed
+
+- `apps/web/app/page.tsx` and the inline tokens in `apps/web/app/globals.css` deleted; subdomain pages own their own pages, and `globals.css` is now a single `@import '@dutyhive/ui/styles/globals.css'`.
+- `apps/web/app/layout.tsx` wraps the tree with `<NextIntlClientProvider>` so client components can `useTranslations()`.
+- `packages/ui/tsconfig.json` and `packages/i18n/tsconfig.json` dropped `rootDir`/`outDir`, matching the pattern set in Phase 2.
+- `packages/ui/package.json` declares React 19 as a peer dependency (not a runtime dep) so we don't bundle a second copy.
+- `next.config.ts` wraps the exported config with `withNextIntl(...)`.
+
+### Verification
+
+`pnpm typecheck` 12/12 ✓ · `pnpm lint` 12/12 ✓ · `pnpm test` 13/13 ✓ (Phase 2 tests still green) · `pnpm check:rls` ✓ · five-subdomain `curl` smoke against `lvh.me` returned the right page each time, `/subs/*` direct request returned 404, `/api/auth/get-session` pass-through returned 200.
+
+### Known follow-ups (Phase 4+)
+
+- Replace hard-coded brand-blue alias in `tokens.css` with the final OKLCH values once the designer ships them.
+- Wire cookie/Accept-Language detection in `@dutyhive/i18n/config` so users can flip to EN once translations are real.
+- Cookie-banner component is wired in the layout but doesn't render in Foundation (no analytics cookies; only-essential-cookies regime). Re-enable when Phase 5 turns on PostHog/Plausible.
+
+---
+
 ## v0.1.0-foundation.2 — 2026-05-04 — Phase 2: DB & Auth
 
 ### Added
