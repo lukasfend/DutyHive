@@ -12,6 +12,7 @@
     "paths": {
       "@/*": ["./*"],
       "@dutyhive/config": ["../../packages/config/src/index.ts"],
+      "@dutyhive/config/intended-purpose": ["../../packages/config/src/intended-purpose.ts"],
       "@dutyhive/config/*": ["../../packages/config/src/*"],
       "@dutyhive/env": ["../../packages/env/src/index.ts"],
       "@dutyhive/env/*": ["../../packages/env/src/*"],

@@ -3,15 +3,34 @@ import type { NextConfig } from 'next';
 /**
  * DutyHive — single Next.js app routing all subdomains.
  *
- * Workspace-package transpilation: Next 15 builds workspace packages directly
+ * Workspace-package transpilation: Next 16 builds workspace packages directly
  * from their TypeScript sources (set in tsconfig paths). `transpilePackages`
  * keeps that working in production builds without per-package build steps.
+ *
+ * Version injection note: Next 16 compiles next.config.ts to a CJS-flavoured
+ * .compiled.js file, which clashes with `"type": "module"` and node-builtin
+ * ESM imports. To stay compatible we keep this config free of node-builtin
+ * imports. Version + build SHA are sourced from env vars:
+ *   - `npm_package_version` is set automatically by pnpm when scripts run.
+ *   - `GIT_SHA` is set by the `prebuild` / `predev` script
+ *     (`scripts/set-build-env.mjs`), which writes `.env.production.local`
+ *     that Next.js then loads at build time. Cross-platform shell-free.
  */
+
+const APP_VERSION = process.env.npm_package_version ?? '0.0.0';
+const BUILD_SHA = process.env.GIT_SHA ?? '';
+
 const config: NextConfig = {
+  /* Forward selected env vars into the client bundle as NEXT_PUBLIC_*. */
+  env: {
+    NEXT_PUBLIC_APP_VERSION: APP_VERSION,
+    NEXT_PUBLIC_BUILD_SHA: BUILD_SHA,
+  },
+
   /* Strict React mode catches subtle bugs early. */
   reactStrictMode: true,
 
-  /* TypeScript checked separately by `pnpm typecheck`; build-time check is redundant. */
+  /* TypeScript checked separately by `pnpm typecheck`; build-time check stays on. */
   typescript: {
     ignoreBuildErrors: false,
   },
@@ -49,10 +68,6 @@ const config: NextConfig = {
         ],
       },
     ];
-  },
-
-  experimental: {
-    /* Server actions on by default in Next 15; keep here for explicit configuration later. */
   },
 };
 

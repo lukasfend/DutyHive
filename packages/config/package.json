@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./brand": "./src/brand.ts",
     "./subdomains": "./src/subdomains.ts",
-    "./flags": "./src/flags.ts"
+    "./flags": "./src/flags.ts",
+    "./intended-purpose": "./src/intended-purpose.ts"
   },
   "scripts": {
     "lint": "echo 'lint placeholder'",

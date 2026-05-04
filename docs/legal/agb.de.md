@@ -27,7 +27,7 @@ In der Beta haftet der Diensteanbieter ausschließlich für Schäden aus **grobe
 
 Gegenüber Verbraucher:innen gelten die Vorschriften des KSchG, insbesondere zu unzulässigen Klauseln, vorrangig.
 
-Die Plattform ist **kein Medizinprodukt** im Sinne der MDR. Sie darf nicht zur Diagnose, Behandlung oder Verhinderung von Erkrankungen eingesetzt werden.
+Die Plattform ist **kein Medizinprodukt** im Sinne der Verordnung (EU) 2017/745 (MDR). Sie darf nicht zur Diagnose, Therapie, Überwachung, Behandlung, Linderung oder Verhinderung von Erkrankungen, Verletzungen oder Behinderungen eingesetzt werden. Die Zweckbestimmung ist ausschließlich administrativ (Personalverwaltung, Schichtplanung, Equipment-Inventar, organisatorische Checklisten). Nutzer:innen, die die Plattform abweichend von dieser Zweckbestimmung einsetzen, tun dies auf eigene Verantwortung; eine Haftung des Diensteanbieters ist insoweit ausgeschlossen.
 
 ## 6. Datenschutz
 

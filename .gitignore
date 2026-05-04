@@ -24,6 +24,7 @@ blob-report/
 .env.*.local
 .env.development
 .env.production
+.env.production.local
 !.env.example
 
 # Editor / IDE

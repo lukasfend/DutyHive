@@ -1,9 +1,10 @@
 import { brand } from '@dutyhive/config';
+import { VersionBadge } from '../components/version-badge';
 
 /**
  * Foundation Phase 1 placeholder homepage.
  *
- * In Phase 3 the middleware rewrites incoming traffic to /_sub/<subdomain>/...
+ * In Phase 3 the proxy rewrites incoming traffic to /_sub/<subdomain>/...
  * and dedicated route-group pages take over (marketing on apex, account on
  * app.*, etc.). Until then this single page proves the build works end-to-end.
  */
@@ -15,6 +16,9 @@ export default function HomePage() {
       <p className="rounded bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
         Foundation Phase 1 · Skelett · {new Date().toISOString().slice(0, 10)}
       </p>
+      <footer className="mt-12">
+        <VersionBadge />
+      </footer>
     </main>
   );
 }

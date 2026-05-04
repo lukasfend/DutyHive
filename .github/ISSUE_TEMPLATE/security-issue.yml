@@ -1,0 +1,55 @@
+name: 🔒 Security issue (only for resolved / public-disclosure issues)
+description: Public security issue — only after coordinated disclosure. For unresolved security reports, email legal@dutyhive.com.
+title: 'security: <one-line summary>'
+labels: ['type:security', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Stop.** If this issue is not yet fixed, do **not** file it publicly. Email `legal@dutyhive.com` with details. We'll respond and coordinate disclosure.
+
+        This template is for tracking *already-resolved* security issues, or coordinated public disclosures.
+
+  - type: input
+    id: version-affected
+    attributes:
+      label: Affected version(s)
+      placeholder: v0.1.0-foundation.1 — v0.1.0-foundation.3
+    validations:
+      required: true
+
+  - type: input
+    id: version-fixed
+    attributes:
+      label: Fixed in version
+      placeholder: v0.1.0-foundation.4
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What was the issue, and why does it matter? Keep it understandable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical
+    attributes:
+      label: Technical detail
+      description: Vulnerability class, affected component, exploit conditions.
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Mitigation
+      description: What was changed to fix it. Reference the commit / PR.
+    validations:
+      required: true
+
+  - type: textarea
+    id: credit
+    attributes:
+      label: Credit
+      description: Who reported it (with their permission).

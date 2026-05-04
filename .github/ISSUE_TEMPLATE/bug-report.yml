@@ -1,0 +1,73 @@
+name: 🐛 Bug report
+description: Something doesn't work the way it should.
+title: 'bug: <one-line summary>'
+labels: ['type:bug', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Bugs are tracked alongside the risk register and the change log.
+        Please don't include user PII (real emails, real org names) in this report.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version + build SHA from the page footer (e.g. `v0.1.0-foundation.1 · build abc1234`).
+      placeholder: v0.1.0-foundation.1 · build abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: Which subdomain / page / endpoint.
+      placeholder: app.dutyhive.com / /api/auth/sign-in
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens
+      description: Describe the actual behavior. Screenshots welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: What was expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered, minimal, deterministic.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (best guess)
+      options:
+        - critical — data loss, security, or production outage
+        - high — feature broken, no workaround
+        - medium — feature broken, workaround exists
+        - low — cosmetic / minor
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Browser, OS, screen size, network, anything else relevant.

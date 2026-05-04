@@ -6,6 +6,7 @@
 ## Structure
 
 - `architecture/` — System overview, data model, RLS strategy, audit log, ADRs
+- `quality/` — Non-medical-device statement, intended-purpose register, risk register, software development plan, release procedure, versioning, change log
 - `guides/` — Dev guide, deploy guide, Hetzner-from-scratch, env vars, release checklist, Keycloak migration path, DNS migration
 - `legal/` — Impressum, Datenschutz, AGB drafts (Austrian law) + DPA checklist
 - `branding/` — Placeholder logo, color tokens, naming conventions

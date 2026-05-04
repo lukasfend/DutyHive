@@ -7,3 +7,9 @@
 export { brand } from './brand';
 export { subdomains, resolveSubdomain, type Subdomain } from './subdomains';
 export { flags } from './flags';
+export {
+  intendedPurpose,
+  type IntendedPurpose,
+  type RiskClass,
+  type ToolKey,
+} from './intended-purpose';

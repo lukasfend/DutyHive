@@ -3,7 +3,6 @@
   "version": "0.1.0-foundation.0",
   "private": true,
   "description": "DutyHive single Next.js app — routes all subdomains via the proxy convention to internal route groups.",
-  "type": "module",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
