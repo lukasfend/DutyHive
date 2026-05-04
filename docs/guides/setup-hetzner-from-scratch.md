@@ -239,7 +239,7 @@ Order in this sequence: `mgmt-01` first (we'll bootstrap from it), then `app-01`
 5. **Networking**:
    - Public IPv4: ✓
    - Public IPv6: ✓
-   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (likely `10.0.1.2`).
+   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (likely `10.0.1.1`).
 6. **SSH keys**: select `dutyhive-admin`.
 7. **Volumes**: none.
 8. **Firewalls**: select `dutyhive-edge`.
@@ -257,7 +257,7 @@ Note the assigned **public IPv4** in the server details page. You'll use it as `
 Same as C.1 with these differences:
 
 - **Type**: shared vCPU **AMD** → **CPX21** (3 vCPU, 4 GB RAM, 80 GB disk).
-- Note the private IP (likely `10.0.1.3`).
+- Note the private IP (likely `10.0.1.2`).
 - **Backups**: enabled.
 - **Labels**: `role=app`, `env=prod`.
 - **Name**: `app-01`.
@@ -269,7 +269,7 @@ Note its public IPv4 as `<APP_PUBLIC_IP>`.
 Same as C.1 with these differences:
 
 - **Type**: shared vCPU **AMD** → **CPX21**.
-- Private IP (likely `10.0.1.4`).
+- Private IP (likely `10.0.1.3`).
 - **Backups**: enabled (this is the box you most want backed up).
 - **Labels**: `role=db`, `env=prod`.
 - **Name**: `db-01`.
@@ -290,8 +290,8 @@ While logged in to each box, verify the private network is up:
 
 ```bash
 mgmt#  ip -4 addr show enp7s0     # or `ip addr show` to see all interfaces
-mgmt#  ping -c 2 10.0.1.3        # should reach app-01
-mgmt#  ping -c 2 10.0.1.4        # should reach db-01
+mgmt#  ping -c 2 10.0.1.2        # should reach app-01
+mgmt#  ping -c 2 10.0.1.3        # should reach db-01
 ```
 
 If `ping` fails, the Private Network attachment didn't go through — re-check the server's Network tab in Hetzner Console.
@@ -401,7 +401,109 @@ mgmt$ cat /etc/apt/apt.conf.d/50unattended-upgrades              # confirm only 
 mgmt$ sudo timedatectl set-timezone Europe/Vienna
 ```
 
-Repeat **all of Phase D** on `app-01` and `db-01` before continuing.
+Repeat **steps D.1 through D.7** on `app-01` and `db-01` before continuing to D.8.
+
+### D.8 Local SSH config — bastion pattern via `mgmt-01`
+
+Once all three boxes have a `deploy` user and root login is disabled, set up a single SSH config block on **your laptop** so that:
+
+- `ssh mgmt` → direct to `mgmt-01` over its public IP.
+- `ssh app` → jumps through `mgmt-01` and lands on `app-01` over the private network (`10.0.1.2`).
+- `ssh db` → jumps through `mgmt-01` and lands on `db-01` over the private network (`10.0.1.3`).
+
+This is the same topology Coolify uses internally to deploy to `app-01` (G.4): `mgmt-01` is the bastion, and the two work boxes only need to be reachable from the private network. The ProxyJump alias also makes the `pg_dump` / Prisma-migrate flows in F.7 and the routine ops runbooks one short word instead of an IP-and-tunnel pile.
+
+Append to `~/.ssh/config` (POSIX) or `$HOME\.ssh\config` (Windows — create the file if it doesn't exist). Replace `<MGMT_PUBLIC_IP>` with the value from C.1.
+
+```ssh-config
+# DutyHive — Hetzner production
+Host mgmt
+  HostName <MGMT_PUBLIC_IP>
+  User deploy
+  IdentityFile ~/.ssh/dutyhive_admin_ed25519
+  IdentitiesOnly yes
+  ServerAliveInterval 60
+
+Host app db
+  User deploy
+  IdentityFile ~/.ssh/dutyhive_admin_ed25519
+  IdentitiesOnly yes
+  ProxyJump mgmt
+  ServerAliveInterval 60
+
+Host app
+  HostName 10.0.1.2
+
+Host db
+  HostName 10.0.1.3
+```
+
+OpenSSH on Windows expands `~` to `$env:USERPROFILE`, so the same `IdentityFile ~/.ssh/dutyhive_admin_ed25519` line works in both shells — no backslashes needed inside the config.
+
+Lock down the file permissions — sshd refuses to read a world-readable config:
+
+```bash
+local$ chmod 600 ~/.ssh/config
+```
+
+```powershell
+local-ps> icacls $HOME\.ssh\config /inheritance:r /grant:r "$($env:USERNAME):F"
+```
+
+Smoke test:
+
+```bash
+local$ ssh mgmt 'whoami && hostname'   # → deploy / mgmt-01
+local$ ssh app  'whoami && hostname'   # → deploy / app-01  (jumps via mgmt)
+local$ ssh db   'whoami && hostname'   # → deploy / db-01   (jumps via mgmt)
+```
+
+```powershell
+local-ps> ssh mgmt 'whoami; hostname'
+local-ps> ssh app  'whoami; hostname'
+local-ps> ssh db   'whoami; hostname'
+```
+
+If `ssh app` or `ssh db` fails, the failure mode usually pinpoints the cause:
+
+- **`Could not resolve hostname mgmt`** — the `Host mgmt` block isn't being read. `ssh -G mgmt | head` shows the effective config; if `hostname` is still `mgmt`, OpenSSH didn't see your edit. Confirm the file path matches what `ssh -F /dev/null -G mgmt` _doesn't_ see (i.e. the default is being used).
+- **`Permission denied (publickey)` after the jump connects** — `app-01`'s or `db-01`'s `deploy` user doesn't have your public key. Re-run D.2 on the offending box, or copy the key over via the still-working hop:
+  ```bash
+  local$ ssh-copy-id -o ProxyJump=mgmt deploy@10.0.1.2
+  ```
+- **`Connection timed out`** when the jump itself fails — UFW or the Hetzner firewall is blocking. Confirm UFW allows `10.0.1.0/24` (D.4) and that each VPS shows `Network attached` in the Hetzner Console under **Networks**.
+- **`channel 0: open failed: administratively prohibited`** — sshd on `mgmt-01` has `AllowTcpForwarding no` (it doesn't by default in our D.3 config, but check if you changed it).
+
+### D.9 (Optional but recommended) Lock down public SSH on `app-01` and `db-01`
+
+Once D.8 is verified, remove the public SSH path to the two work boxes. After this change, the **only** way into `app-01` or `db-01` is via `mgmt-01` as a jump host — which is exactly the topology Coolify, your migration tunnel (F.7), and your nightly backup script (L.2) already use.
+
+You have two options. Pick one:
+
+**Option A — narrow the existing firewall rule (one-line change):**
+
+1. Hetzner Console → **Firewalls → dutyhive-edge → Edit**.
+2. Inbound SSH rule: change source from `<YOUR_IP>/32` to `<MGMT_PUBLIC_IP>/32`. Now only mgmt-01's public IP is allowed to hit port 22 on any box that has this firewall.
+3. Re-add a separate rule for SSH from `<YOUR_IP>/32` and apply it **only to `mgmt-01`** (Hetzner firewalls can be applied per-server) — this is what gives you direct `ssh mgmt` while still blocking direct SSH to the two work boxes.
+
+**Option B — split the firewall (cleaner long-term):**
+
+1. Create `dutyhive-mgmt-edge`: inbound SSH from `<YOUR_IP>/32`, outbound default. Apply only to `mgmt-01`.
+2. Create `dutyhive-app-edge`: inbound HTTP/HTTPS `0.0.0.0/0,::/0`, **no SSH from public**. Apply to `app-01`. (db-01 needs neither, so attach `dutyhive-app-edge` minus the HTTP/HTTPS rules, or simply leave no firewall and rely on UFW + the private-network listener.)
+3. Detach `dutyhive-edge` from `app-01` and `db-01` once the new firewalls are attached and verified.
+
+Verify the lockdown from your laptop:
+
+```bash
+local$ ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>   # should time out or be refused
+local$ ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>    # should time out or be refused
+local$ ssh app 'echo OK'                                # should still succeed via mgmt
+local$ ssh db  'echo OK'                                # should still succeed via mgmt
+```
+
+If both refusals and both successes hold, the bastion topology is enforced.
+
+> **Why this matters:** even if your laptop SSH key leaks, an attacker can only land on `mgmt-01`. `db-01` — the box that holds organisation/audit data once products go live — is one extra hop, one extra audit log entry, and one extra firewall change away. The cost of D.9 is one firewall edit; the value is a real defence-in-depth boundary.
 
 ---
 
@@ -468,7 +570,7 @@ db$  sudo apt install -y postgresql-17 postgresql-contrib-17
 
 ### F.2 Bind Postgres to the private network only
 
-Get `db-01`'s private IP (should be `10.0.1.4`):
+Get `db-01`'s private IP (should be `10.0.1.3`):
 
 ```bash
 db$  ip -4 addr show | grep '10.0.'
@@ -483,7 +585,7 @@ db$  sudo vim /etc/postgresql/17/main/postgresql.conf
 Change:
 
 ```conf
-listen_addresses = '10.0.1.4'         # private IP of db-01 — never set to '*'
+listen_addresses = '10.0.1.3'         # private IP of db-01 — never set to '*'
 port = 5432
 ssl = on
 ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'      # snakeoil first; replace in F.5
@@ -504,8 +606,8 @@ db$  sudo vim /etc/postgresql/17/main/pg_hba.conf
 # TYPE  DATABASE          USER              ADDRESS         METHOD
 local   all               postgres                          peer
 local   all               all                               peer
-hostssl all               all               10.0.1.3/32    scram-sha-256
-hostssl replication       all               10.0.1.3/32    scram-sha-256
+hostssl all               all               10.0.1.2/32    scram-sha-256
+hostssl replication       all               10.0.1.2/32    scram-sha-256
 # Reject any other host explicitly so a misconfigured listen_addresses can't leak.
 host    all               all               0.0.0.0/0       reject
 host    all               all               ::/0            reject
@@ -516,7 +618,7 @@ Reload Postgres:
 ```bash
 db$  sudo systemctl restart postgresql@17-main
 db$  sudo -u postgres psql -c "SHOW listen_addresses;"
-db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.1.4:5432 is listening
+db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.1.3:5432 is listening
 ```
 
 ### F.4 Create roles + database + extensions
@@ -598,10 +700,11 @@ The connection string used by the app will set `?sslmode=verify-full&sslrootcert
 ### F.6 Smoke-test the connection from `app-01`
 
 ```bash
-app$  sudo apt install -y postgresql-client-17
-app$  PGPASSWORD='<APP_DB_PASSWORD>' psql \
-        "host=10.0.1.4 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
-        -c "SELECT current_user, current_database();"
+local$ ssh app
+app$   sudo apt install -y postgresql-client-17
+app$   PGPASSWORD='<APP_DB_PASSWORD>' psql \
+         "host=10.0.1.3 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
+         -c "SELECT current_user, current_database();"
 # expected output:
 #  current_user   | current_database
 # ----------------+------------------
@@ -612,31 +715,61 @@ If this fails: check `pg_hba.conf` (F.3), check the firewall (`sudo ufw status` 
 
 ### F.7 Apply Prisma migrations against prod
 
-From your laptop (or a CI runner once Phase 6+ adds GitHub Actions), with the `MIGRATE_DATABASE_URL` pointing at db-01:
+From your laptop (or a CI runner once Phase 6+ adds GitHub Actions), with the `MIGRATE_DATABASE_URL` pointing at db-01.
+
+`db-01` is **not** publicly reachable on 5432 — that's the point. Three ways to run migrations, in order of preference:
+
+1. **SSH-tunnel from your laptop via `mgmt-01`** (recommended for the first deploy and ongoing routine migrations). The `mgmt` alias from D.8 makes this a one-liner:
+
+   ```bash
+   local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
+   local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require' \
+            pnpm --filter @dutyhive/db exec prisma migrate deploy
+   local$ kill %1   # close the tunnel
+   ```
+
+   Without the alias, the equivalent is `ssh -L 5432:10.0.1.3:5432 -N deploy@<MGMT_PUBLIC_IP> -i ~/.ssh/dutyhive_admin_ed25519 &`.
+
+   On Windows / PowerShell, run the tunnel in a second window instead of backgrounding it (PowerShell's `&` is the call operator, not "background"):
+
+   ```powershell
+   # Window 1 — leave this running:
+   local-ps> ssh -L 5432:10.0.1.3:5432 -N mgmt
+
+   # Window 2:
+   local-ps> $env:MIGRATE_DATABASE_URL = 'postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require'
+   local-ps> pnpm --filter @dutyhive/db exec prisma migrate deploy
+   ```
+
+2. **Run from `app-01`**: clone the repo there once and use it as the migration runner. Coolify can invoke this on each deploy as a pre-start hook once the build matrix grows; for Foundation, option 1 is simpler.
+
+3. **Run from `mgmt-01`**: same idea as option 2, but from the bastion. Avoid this — `mgmt-01`'s job is orchestration, not application code.
+
+After every migration run, re-check the RLS coverage gate against prod via the same tunnel:
 
 ```bash
-local$ MIGRATE_DATABASE_URL="postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@<DB_PUBLIC_IP_OR_TUNNEL>:5432/dutyhive_prod?sslmode=require" \
-  pnpm --filter @dutyhive/db exec prisma migrate deploy
+local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
+local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require' \
+         pnpm check:rls
+local$ kill %1
 ```
-
-But `db-01` is **not** publicly reachable on 5432 — that's the point. Two ways to run migrations:
-
-1. **SSH-tunnel from your laptop via mgmt-01** (recommended for the first deploy):
-   ```bash
-   local$ ssh -L 5432:10.0.1.4:5432 deploy@<MGMT_PUBLIC_IP>
-   # in another terminal:
-   local$ MIGRATE_DATABASE_URL="postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require" \
-            pnpm --filter @dutyhive/db exec prisma migrate deploy
-   ```
-2. **Run from `app-01`**: clone the repo there once and use it as the migration runner. Coolify will invoke this for you in production (Phase G.6).
-
-For the Foundation first-deploy, option 1 is fine.
 
 ---
 
 ## Phase G — Coolify on `mgmt-01`
 
 Coolify is the deploy control plane. It runs Docker, pulls the repo on `git push`, builds the Next.js standalone image, and ships it to `app-01`.
+
+### How Coolify reaches the other boxes
+
+Coolify on `mgmt-01` talks to the rest of the infrastructure over the **Hetzner Private Network** (the `dutyhive-internal` 10.0.1.0/24 subnet from B.2). Two flows matter:
+
+- **Coolify → `app-01`** for deploys: SSH from `mgmt-01` (`10.0.1.1`) to `deploy@10.0.1.2` using the dedicated key generated in G.4. UFW on `app-01` already allows `from 10.0.1.0/24` (D.4), so this works without any public SSH path.
+- **App on `app-01` → `db-01`** at runtime: TCP from `10.0.1.2` to `10.0.1.3:5432` over the private network, authenticated as `dutyhive_app` with TLS verification against the cert from F.5. `pg_hba.conf` on db-01 allows `hostssl all all 10.0.1.2/32 scram-sha-256` (F.3) and rejects everything else.
+
+Coolify itself never touches db-01. The migration tunnel from F.7 is what bridges your laptop to db-01 _via_ mgmt-01 — same physical path Coolify uses, but for one-off Prisma runs instead of the long-lived runtime connection.
+
+If you completed D.9 (public SSH locked down on app-01/db-01), the only externally reachable SSH port in the whole stack is `mgmt-01:22` — restricted to your home IP. Everything else flows over the private network.
 
 ### G.1 Install Docker (Coolify's prereq)
 
@@ -700,7 +833,7 @@ In Coolify UI:
 
 1. **Servers → Add Server**.
 2. **Name**: `app-01`.
-3. **IP**: `10.0.1.3` (private — Coolify connects over the internal network).
+3. **IP**: `10.0.1.2` (private — Coolify connects over the internal network).
 4. **User**: `deploy`.
 5. **Port**: `22`.
 6. **SSH key**: select the `app-01-key` Coolify just generated.
@@ -752,8 +885,8 @@ Paste these into Coolify's environment-variable form (each as a separate row):
 
 ```env
 NODE_ENV=production
-DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.0.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
-MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.0.1.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.0.1.3:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.0.1.3:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
 BETTER_AUTH_SECRET=<paste-from-openssl-rand>
 BETTER_AUTH_URL=https://app.dutyhive.com
 NEXT_PUBLIC_ROOT_DOMAIN=dutyhive.com
@@ -998,7 +1131,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.0.1.2:8090 --token <TOKEN_FROM_HUB>
+ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.0.1.1:8090 --token <TOKEN_FROM_HUB>
 Restart=on-failure
 
 [Install]
@@ -1231,8 +1364,10 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 - [ ] `fail2ban` jail `sshd` is active on all three VPS.
 - [ ] UFW is enabled on all three VPS with the rules from D.4.
 - [ ] Postgres `listen_addresses` is the private IP only (not `*`).
-- [ ] `pg_hba.conf` allows only `10.0.1.3/32` (app-01) — no `0.0.0.0/0`.
+- [ ] `pg_hba.conf` allows only `10.0.1.2/32` (app-01) — no `0.0.0.0/0`.
 - [ ] Hetzner Cloud Firewall has SSH locked to your home IP.
+- [ ] Local `~/.ssh/config` has `mgmt`, `app`, `db` aliases (D.8); `ssh app` and `ssh db` succeed via ProxyJump.
+- [ ] (Recommended) D.9 complete — direct SSH to `<APP_PUBLIC_IP>` and `<DB_PUBLIC_IP>` is refused; only `ssh mgmt` works publicly.
 
 ### Compliance
 
@@ -1256,24 +1391,26 @@ local$ git push origin main
 ### Routine: apply a Prisma migration to production
 
 ```bash
-local$ ssh -L 5432:10.0.1.4:5432 deploy@<MGMT_PUBLIC_IP>
-# in another terminal:
+local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require' \
          pnpm --filter @dutyhive/db exec prisma migrate deploy
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require' \
          pnpm check:rls
+local$ kill %1
 ```
+
+(Windows / PowerShell: run the `ssh -L` line in its own window and close the window when done — see F.7 for the two-window pattern.)
 
 ### Incident: SSH locked out (your IP changed)
 
-Hetzner Cloud Firewall has a "Servers with this firewall" view — temporarily widen the rule from your **new** home IP, fix, narrow again.
+Hetzner Cloud Firewall has a "Servers with this firewall" view — temporarily widen the rule from your **new** home IP, fix, narrow again. If you completed D.9, only the `dutyhive-mgmt-edge` firewall (or whichever rule applies to `mgmt-01`) needs to be widened — `app-01` and `db-01` already refuse public SSH.
 
 ### Incident: db-01 unreachable
 
 ```bash
-local$ ssh deploy@<MGMT_PUBLIC_IP>
-mgmt$  ping 10.0.1.4                      # private network up?
-mgmt$  ssh deploy@10.0.1.4                # SSH via private net
+local$ ssh mgmt
+mgmt$  ping -c 2 10.0.1.3                 # private network up?
+local$ ssh db                             # SSH via mgmt jump
 db$    sudo systemctl status postgresql@17-main
 db$    sudo journalctl -u postgresql@17-main -n 100
 ```
