@@ -1,13 +1,18 @@
 /**
- * @dutyhive/email — Foundation Phase 4:
- *   - client.ts:               new Resend(env.RESEND_API_KEY)
- *   - send.ts:                 sendEmail() — dev → mailpit (SMTP), prod → Resend HTTP API
- *   - templates/MagicLink.tsx
- *   - templates/EmailVerification.tsx
- *   - templates/NewsletterDoubleOptIn.tsx
- *   - templates/Welcome.tsx
+ * @dutyhive/email — public surface.
  *
- * Locale handling: locale prop passed into every template, defaults to 'de'.
+ *   sendMail({...})              backend-aware: dev → SMTP/Mailpit, prod → Resend
+ *   assertProductionMailReady()  refuse to start prod with no Resend key (R-0010)
+ *   render(...)                  React Email renderer (re-export for convenience)
+ *
+ * Templates are reachable via the per-template subpath imports:
+ *   import EmailVerification from '@dutyhive/email/templates/email-verification'
+ *   import MagicLink         from '@dutyhive/email/templates/magic-link'
+ *   import NewsletterConfirm from '@dutyhive/email/templates/newsletter-confirm'
+ *
+ * Subpath imports keep server bundles small — pulling in one template
+ * doesn't drag the others or React Email's full runtime.
  */
-
-export const FOUNDATION_PHASE_NOTE = 'Phase 4 wires React Email templates + Resend send.';
+export { sendMail, assertProductionMailReady } from './send';
+export { render } from '@react-email/render';
+export type { SendMailInput, SendMailResult, EmailAddress } from './types';

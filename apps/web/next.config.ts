@@ -61,6 +61,16 @@ const config: NextConfig = {
   /* Output standalone so Coolify / Docker can copy a minimal artifact in deployment. */
   output: 'standalone',
 
+  /* Ship the legal-doc Markdown along with the standalone bundle — the
+   * marketing routes read them at request time via process.cwd(). The path
+   * pattern is relative to the repo root because the standalone tracer
+   * walks up from apps/web/. */
+  outputFileTracingIncludes: {
+    '/datenschutz': ['../../docs/legal/datenschutz.de.md'],
+    '/impressum': ['../../docs/legal/impressum.de.md'],
+    '/agb': ['../../docs/legal/agb.de.md'],
+  },
+
   /* Security and SEO defaults. Per-route headers added in app/api routes as needed. */
   async headers() {
     return [

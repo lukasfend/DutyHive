@@ -17,6 +17,41 @@
 
 ---
 
+## v0.1.0-foundation.4 — 2026-05-04 — Phase 4: Marketing site, newsletter, legal pages
+
+### Added
+
+- **`@dutyhive/email` package.** Backend-agnostic `sendMail({...})` that picks SMTP/Mailpit in development and Resend in production. Lazy-initialised single client per process; failures returned as `{ ok: false, error }` so callers can decide to fail-soft (newsletter) or fail-hard (password reset). `assertProductionMailReady()` helper refuses to start prod with no `RESEND_API_KEY` (R-0010 mitigation).
+- **React Email templates.** `EmailVerification`, `MagicLink`, `NewsletterConfirm` — shared `EmailLayout` shell with brand wordmark, container, footer with support address. List-Unsubscribe header wired for newsletter mail (RFC 8058 one-click unsubscribe).
+- **Newsletter double-opt-in flow.**
+  - `POST /api/subscribe` → upsert `EmailSubscriber` with random 64-hex `confirmationToken`, send confirmation mail. Always returns 200 to avoid leaking subscriber-list status.
+  - `GET /api/subscribe/confirm?token=…` → set `confirmedAt`, redirect to `/newsletter/confirmed`.
+  - `GET|POST /api/subscribe/unsubscribe?token=…` → set `unsubscribedAt`, null token, redirect to `/newsletter/unsubscribed`. POST path supports List-Unsubscribe-Post one-click.
+  - All three routes write to `audit_entry` with `newsletter.subscribe.{requested,confirmed,unsubscribed}` actions.
+- **Marketing landing polish.** Newsletter form (client component with `useTranslations`) integrated below the hero. Form states: idle / sending / success / error.
+- **Legal pages from Markdown.** `/impressum`, `/datenschutz`, `/agb` rendered server-side from `docs/legal/*.de.md` via `marked`. `outputFileTracingIncludes` in `next.config.ts` ships the markdown into the standalone bundle. Pages set `robots: noindex` while drafts are unreviewed.
+- **`@tailwindcss/typography`** plugin registered in `tokens.css` for `.prose` styling on the legal pages.
+- **`CookieBanner` component** in `@dutyhive/ui`. Persists choice via first-party `dh_cookie_consent` cookie (1-year max-age, SameSite=Lax). Wired into the marketing layout but hidden via `disabled` prop — Foundation sets only essential cookies (Better Auth session, locale prefs), which don't require explicit consent under EU/AT rules. Flip the prop when Phase 5+ adds analytics.
+- **Newsletter status pages**: `/newsletter/confirmed`, `/newsletter/expired`, `/newsletter/unsubscribed` — Card-based feedback under the marketing layout.
+- **i18n catalogue extension.** German + English `marketing.newsletter` namespace covering form labels, success/error copy, GDPR consent line.
+
+### Changed
+
+- **`@dutyhive/auth`'s mailer** refactored from inline nodemailer to `@dutyhive/email` + React Email templates. Better Auth's `sendVerificationEmail` and `magicLink.sendMagicLink` now render the new templates.
+- **`@dutyhive/audit`'s `auditLog`** switched from `tx.auditEntry.create()` to a raw-SQL `$executeRaw` insert. Postgres applies the SELECT policy to RETURNING rows, which broke the system-event path (org=null + actorUserId=null, e.g. anonymous newsletter signups). The raw INSERT skips RETURNING, so only the WITH CHECK fires.
+
+### Verification
+
+`pnpm typecheck` 12/12 ✓ · `pnpm lint` 12/12 ✓ · `pnpm test` 13/13 ✓ (Phase 2 RLS suite still green) · `pnpm check:rls` ✓ · full newsletter lifecycle smoke: `curl POST /api/subscribe` → row created with token, confirmation mail in Mailpit (`DutyHive — bitte bestätige deine Newsletter-Anmeldung`) → `GET /api/subscribe/confirm?token=…` → `confirmedAt` set → `GET /api/subscribe/unsubscribe?token=…` → `unsubscribedAt` set + token nulled. `audit_entry` shows three rows: `newsletter.subscribe.{requested,confirmed,unsubscribed}`. Legal pages `/impressum`, `/datenschutz`, `/agb` render with markdown content + draft warning intact.
+
+### Known follow-ups (Phase 5+)
+
+- Real Resend domain verification + SPF/DKIM/DMARC happens in the deployment (Phase 6 / Hetzner runbook).
+- Newsletter sending UI for operators is post-Foundation; today every newsletter goes out via direct DB query + ad-hoc Resend call.
+- The cookie banner becomes visible the moment we turn on analytics (PostHog/Plausible) — Phase 5 task.
+
+---
+
 ## v0.1.0-foundation.3 — 2026-05-04 — Phase 3: Subdomain routing, UI, i18n
 
 ### Added

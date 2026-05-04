@@ -16,38 +16,26 @@
  * as a passwordless alternative; 2FA is plugin-enabled but the enrolment UI
  * is deferred (out-of-scope for Foundation).
  *
- * Mail backend (Phase 2). All transactional mail goes through SMTP. In dev
- * SMTP_HOST/SMTP_PORT point at mailpit; in production they will be unused
- * once @dutyhive/email (Phase 4) takes over and routes through Resend.
+ * Mail backend. All transactional mail flows through `@dutyhive/email`,
+ * which picks SMTP/Mailpit in development and Resend in production.
+ * Templates live in `@dutyhive/email/templates/*` so a brand refresh edits
+ * them once for every channel.
  */
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { organization } from 'better-auth/plugins/organization';
 import { magicLink } from 'better-auth/plugins/magic-link';
 import { twoFactor } from 'better-auth/plugins/two-factor';
-import { createTransport } from 'nodemailer';
 import { prisma } from '@dutyhive/db';
 import { auditLog } from '@dutyhive/audit';
+import { sendMail, render } from '@dutyhive/email';
+import EmailVerification from '@dutyhive/email/templates/email-verification';
+import MagicLinkTemplate from '@dutyhive/email/templates/magic-link';
 import { env } from '@dutyhive/env/server';
 import { clientEnv } from '@dutyhive/env/client';
 
 const ROOT_DOMAIN_HOST = clientEnv.NEXT_PUBLIC_ROOT_DOMAIN;
 const ROOT_DOMAIN = ROOT_DOMAIN_HOST.split(':')[0]!;
-
-const mailer = createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: false,
-});
-
-async function sendMail(to: string, subject: string, html: string) {
-  await mailer.sendMail({
-    from: env.RESEND_FROM,
-    to,
-    subject,
-    html,
-  });
-}
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
@@ -64,14 +52,12 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
-      await sendMail(
-        user.email,
-        'DutyHive — bestätige deine Email-Adresse',
-        `<p>Hallo ${user.name},</p>
-         <p>Bestätige deine Email-Adresse, um dein DutyHive-Konto zu aktivieren:</p>
-         <p><a href="${url}">${url}</a></p>
-         <p>Wenn du dich nicht registriert hast, kannst du diese Mail ignorieren.</p>`,
-      );
+      const html = await render(EmailVerification({ name: user.name, url }));
+      await sendMail({
+        to: user.email,
+        subject: 'DutyHive — bestätige deine Email-Adresse',
+        html,
+      });
     },
   },
 
@@ -129,13 +115,12 @@ export const auth = betterAuth({
     }),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        await sendMail(
-          email,
-          'DutyHive — Magic-Link Login',
-          `<p>Klick zum Anmelden:</p>
-           <p><a href="${url}">${url}</a></p>
-           <p>Der Link gilt 5 Minuten und kann nur einmal genutzt werden.</p>`,
-        );
+        const html = await render(MagicLinkTemplate({ url }));
+        await sendMail({
+          to: email,
+          subject: 'DutyHive — Magic-Link Login',
+          html,
+        });
       },
     }),
     twoFactor({}),

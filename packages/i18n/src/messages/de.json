@@ -28,6 +28,18 @@
       "imprint": "Impressum",
       "privacy": "Datenschutz",
       "terms": "AGB"
+    },
+    "newsletter": {
+      "title": "Updates per Mail",
+      "description": "Wir schicken dir eine Mail wenn ein Tool live geht. Höchstens einmal pro Monat. Jederzeit abbestellbar.",
+      "emailLabel": "Email-Adresse",
+      "emailPlaceholder": "du@example.com",
+      "submit": "Anmelden",
+      "submitting": "Sende …",
+      "successTitle": "Fast geschafft",
+      "successMessage": "Wir haben dir eine Bestätigungsmail geschickt. Klick auf den Link, dann bist du dabei.",
+      "errorMessage": "Hat nicht geklappt. Bitte später nochmal versuchen oder support@dutyhive.com kontaktieren.",
+      "consent": "Mit dem Klick auf 'Anmelden' bestätigst du unsere Datenschutzbestimmungen."
     }
   },
   "account": {

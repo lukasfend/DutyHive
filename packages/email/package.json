@@ -7,12 +7,28 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./templates/*": "./src/templates/*.tsx"
   },
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit",
     "test": "echo 'template snapshot tests in Phase 4'",
     "clean": "rm -rf .turbo dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@dutyhive/config": "workspace:*",
+    "@dutyhive/env": "workspace:*",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
+    "nodemailer": "^8.0.7",
+    "resend": "^6.12.2"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.0"
   }
 }

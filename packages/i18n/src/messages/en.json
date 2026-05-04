@@ -28,6 +28,18 @@
       "imprint": "__EN_TODO__ Imprint",
       "privacy": "__EN_TODO__ Privacy",
       "terms": "__EN_TODO__ Terms"
+    },
+    "newsletter": {
+      "title": "__EN_TODO__ Updates by mail",
+      "description": "__EN_TODO__ We'll mail you when a tool goes live. At most once a month. Unsubscribe anytime.",
+      "emailLabel": "__EN_TODO__ Email",
+      "emailPlaceholder": "__EN_TODO__ you@example.com",
+      "submit": "__EN_TODO__ Subscribe",
+      "submitting": "__EN_TODO__ Sending …",
+      "successTitle": "__EN_TODO__ Almost there",
+      "successMessage": "__EN_TODO__ We sent you a confirmation mail. Click the link to finish.",
+      "errorMessage": "__EN_TODO__ Something went wrong. Please retry or contact support@dutyhive.com.",
+      "consent": "__EN_TODO__ By clicking 'Subscribe' you confirm our privacy policy."
     }
   },
   "account": {

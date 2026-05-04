@@ -22,6 +22,7 @@
  */
 
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
 
 @theme {
   /* Brand scale — currently aliased to Tailwind's blue. Replace with brand

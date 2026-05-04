@@ -51,33 +51,69 @@ function hashOrNull(value: string | null | undefined): string | null {
     .digest('hex');
 }
 
-export async function auditLog(input: AuditLogInput): Promise<void> {
-  const data: Prisma.AuditEntryCreateInput = {
-    action: input.action,
-    actor: input.actorUserId ? { connect: { id: input.actorUserId } } : undefined,
-    organization: input.organizationId ? { connect: { id: input.organizationId } } : undefined,
-    resourceType: input.resourceType ?? null,
-    resourceId: input.resourceId ?? null,
-    payload: input.payload ? (input.payload as Prisma.InputJsonValue) : Prisma.JsonNull,
-    ipHash: hashOrNull(input.request?.ip),
-    userAgentHash: hashOrNull(input.request?.userAgent),
-  };
+/**
+ * Insert an audit row WITHOUT a `RETURNING` clause.
+ *
+ * Postgres applies the SELECT policy to the row produced by RETURNING — so
+ * Prisma's default `create()` (which always RETURNINGs the inserted row)
+ * fails for rows the current connection isn't allowed to see, even when
+ * the WITH CHECK clause permits the insert. That bites on the system-event
+ * path (org=null + actorUserId=null), e.g. anonymous newsletter signups.
+ *
+ * Going through `$executeRaw` skips RETURNING, so only the INSERT-policy
+ * WITH CHECK runs. The audit_entry's INSERT policy permits null-org rows,
+ * so this path always works.
+ */
+async function rawInsert(
+  tx: Prisma.TransactionClient | typeof prisma,
+  input: AuditLogInput,
+): Promise<void> {
+  const payloadJson =
+    input.payload === undefined || input.payload === null ? null : JSON.stringify(input.payload);
 
+  await tx.$executeRaw`
+    INSERT INTO "audit_entry" (
+      "id",
+      "organizationId",
+      "actorUserId",
+      "action",
+      "resourceType",
+      "resourceId",
+      "payload",
+      "ipHash",
+      "userAgentHash",
+      "createdAt"
+    ) VALUES (
+      gen_random_uuid(),
+      ${input.organizationId ?? null},
+      ${input.actorUserId ?? null},
+      ${input.action},
+      ${input.resourceType ?? null},
+      ${input.resourceId ?? null},
+      ${payloadJson}::jsonb,
+      ${hashOrNull(input.request?.ip)},
+      ${hashOrNull(input.request?.userAgent)},
+      NOW()
+    )
+  `;
+}
+
+export async function auditLog(input: AuditLogInput): Promise<void> {
   // When called inside an existing transaction (e.g. from withAuthContext),
   // assume the GUCs are already set and just write the row.
   if (input.tx) {
-    await input.tx.auditEntry.create({ data });
+    await rawInsert(input.tx, input);
     return;
   }
 
-  // Standalone call: open a private transaction and set the GUCs needed for
-  // the SELECT policy on audit_entry to pass the RETURNING clause.
-  // - For tenant rows: set app.current_organization_id.
-  // - For global rows with an actor (e.g. auth.signup): set app.current_user_id.
+  // Standalone call: open a private transaction and set the GUCs so any
+  // future readers (operators, future audit UI) inside the same context
+  // would see the row. The INSERT itself does not require a matching
+  // SELECT policy because we don't RETURNING — see rawInsert() comment.
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.current_user_id', ${input.actorUserId ?? ''}, true)`;
     await tx.$executeRaw`SELECT set_config('app.current_organization_id', ${input.organizationId ?? ''}, true)`;
-    await tx.auditEntry.create({ data });
+    await rawInsert(tx, input);
   });
 }
 

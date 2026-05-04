@@ -2,13 +2,16 @@ import { getTranslations } from 'next-intl/server';
 import { brand } from '@dutyhive/config';
 import { Card, CardDescription, CardHeader, CardTitle } from '@dutyhive/ui';
 import { VersionBadge } from '../../../components/version-badge';
+import { NewsletterForm } from './_components/newsletter-form';
 
 /**
  * Marketing landing page (apex `dutyhive.com`).
  *
- * Phase 3 wires next-intl: copy comes from @dutyhive/i18n message catalogues
- * (DE primary, EN stubbed for future translators). Phase 4 layers in the
- * newsletter form and the cookie banner.
+ *   Hero  →  product preview cards  →  newsletter form  →  version badge
+ *
+ * Copy comes from `@dutyhive/i18n` message catalogues. The newsletter form
+ * is a client component (uses local state); everything else is a Server
+ * Component to keep the JS payload small.
  */
 export default async function MarketingHomePage() {
   const t = await getTranslations('marketing');
@@ -43,6 +46,10 @@ export default async function MarketingHomePage() {
             <CardDescription>{tProducts('checklist.description')}</CardDescription>
           </CardHeader>
         </Card>
+      </section>
+
+      <section className="mx-auto mt-16 max-w-md">
+        <NewsletterForm />
       </section>
 
       <section className="mt-16 flex justify-center">

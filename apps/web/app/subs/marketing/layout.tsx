@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { brand } from '@dutyhive/config';
+import { CookieBanner } from '@dutyhive/ui';
 
 /**
  * Marketing layout (apex `dutyhive.com`).
@@ -27,6 +28,12 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       </header>
 
       <div className="flex-1">{children}</div>
+
+      {/* Cookie banner is wired here but stays hidden in Foundation —
+          we set only essential cookies (Better Auth session, locale prefs)
+          which don't require explicit consent under EU/AT rules. Flip
+          `disabled={false}` when Phase 5+ adds analytics. */}
+      <CookieBanner privacyHref="/datenschutz" disabled />
 
       <footer className="border-t border-[color:var(--color-border)]">
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-3 px-6 py-6 text-sm text-[color:var(--color-muted)] sm:flex-row sm:items-center">

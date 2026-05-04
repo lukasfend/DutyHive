@@ -1,6 +1,6 @@
 {
   "name": "@dutyhive/web",
-  "version": "0.1.0-foundation.3",
+  "version": "0.1.0-foundation.4",
   "private": true,
   "description": "DutyHive single Next.js app — routes all subdomains via the proxy convention to internal route groups.",
   "scripts": {
@@ -18,14 +18,18 @@
     "@dutyhive/auth": "workspace:*",
     "@dutyhive/config": "workspace:*",
     "@dutyhive/db": "workspace:*",
+    "@dutyhive/email": "workspace:*",
     "@dutyhive/env": "workspace:*",
     "@dutyhive/i18n": "workspace:*",
     "@dutyhive/logger": "workspace:*",
     "@dutyhive/ui": "workspace:*",
+    "@tailwindcss/typography": "^0.5.19",
+    "marked": "^18.0.3",
     "next": "16.2.4",
     "next-intl": "^4.11.0",
     "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react-dom": "19.2.5",
+    "zod": "3.24.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.4",

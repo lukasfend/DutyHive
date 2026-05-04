@@ -23,11 +23,8 @@
     "@dutyhive/audit": "workspace:*",
     "@dutyhive/config": "workspace:*",
     "@dutyhive/db": "workspace:*",
+    "@dutyhive/email": "workspace:*",
     "@dutyhive/env": "workspace:*",
-    "better-auth": "^1.6.9",
-    "nodemailer": "^8.0.7"
-  },
-  "devDependencies": {
-    "@types/nodemailer": "^8.0.0"
+    "better-auth": "^1.6.9"
   }
 }

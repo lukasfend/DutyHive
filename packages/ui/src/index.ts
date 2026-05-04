@@ -20,5 +20,6 @@ export {
   CardHeader,
   CardTitle,
 } from './components/card';
+export { CookieBanner, type CookieBannerProps } from './components/cookie-banner';
 export { Input, type InputProps } from './components/input';
 export { Label, type LabelProps } from './components/label';
