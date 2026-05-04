@@ -1,14 +1,32 @@
 /**
- * @dutyhive/db — Foundation Phase 2 will populate this with:
- *   - Prisma Client export (after `prisma init` and Better Auth schema generation).
- *   - `withTenant(tx, { userId, organizationId })` — sets transaction-local RLS vars.
- *   - A guarded `prisma` proxy that throws if used outside `withAuthContext`.
+ * @dutyhive/db — public surface.
  *
- * RLS pattern (Phase 2):
- *   inside a transaction we run:
- *     SELECT set_config('app.current_user_id', $1, true);
- *     SELECT set_config('app.current_organization_id', $2, true);
- *   then perform queries as role `dutyhive_app` (no BYPASSRLS).
+ * Two named exports:
+ *
+ *   prisma     — singleton PrismaClient. Direct use only for un-scoped contexts
+ *                (Better Auth, public newsletter, boot-time audits). Tenant code
+ *                must go through @dutyhive/auth's `withAuthContext()`.
+ *
+ *   withTenant — RLS bridge. Sets transaction-local app.current_user_id and
+ *                app.current_organization_id GUCs. See ./with-tenant.ts.
+ *
+ * Re-exports Prisma's namespace so callers don't need to import @prisma/client
+ * separately for Prisma.TransactionClient or generated model types.
  */
-
-export const FOUNDATION_PHASE_NOTE = 'Phase 2 wires Prisma Client + RLS transaction wrapper.';
+export { prisma } from './client';
+export { withTenant, type TenantContext } from './with-tenant';
+export { Prisma } from '@prisma/client';
+export type {
+  PrismaClient,
+  User,
+  Session,
+  Account,
+  Verification,
+  Organization,
+  Member,
+  Invitation,
+  TwoFactor,
+  AuditEntry,
+  EmailSubscriber,
+  LegalConsent,
+} from '@prisma/client';

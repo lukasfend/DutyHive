@@ -20,5 +20,9 @@
     "test": "echo 'unit tests (Phase 2)'",
     "test:rls": "echo 'RLS integration tests (Phase 2)'",
     "clean": "rm -rf .turbo dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "prisma": "^6.19.3"
   }
 }

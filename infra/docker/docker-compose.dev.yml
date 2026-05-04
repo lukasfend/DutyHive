@@ -3,8 +3,8 @@
 # Run from repo root:
 #   docker compose -f infra/docker/docker-compose.dev.yml up -d
 #
-# Phase 1 stub: Postgres only. Phase 2 adds extension-bootstrap and RLS roles.
-# Phase 4 will add mailpit. Phase 5/6 adds minio for S3 emulation.
+# Phase 2 stack: Postgres (with RLS roles bootstrapped via init SQL) + Mailpit.
+# Phase 5/6 will add minio for S3 emulation.
 #
 # Volumes are named so they survive `docker compose down`. Use `down -v` to nuke.
 
@@ -17,7 +17,6 @@ services:
       POSTGRES_USER: dutyhive
       POSTGRES_PASSWORD: devpassword
       POSTGRES_DB: dutyhive_dev
-      # German collation for locale-correct sorting in dev mirroring prod expectations.
       LANG: C.UTF-8
     ports:
       - '5432:5432'
@@ -29,6 +28,26 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  mailpit:
+    # Mailpit catches all outgoing dev mail (Better Auth verification, magic links,
+    # newsletter). Smtp on 1025, web UI on 8025. Phase 4 swaps to Resend in prod
+    # via @dutyhive/email backend selection.
+    image: axllent/mailpit:latest
+    container_name: dutyhive_mailpit
+    restart: unless-stopped
+    ports:
+      - '1025:1025' # SMTP
+      - '8025:8025' # Web UI — http://localhost:8025
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--spider', 'http://localhost:8025/api/v1/info']
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   dh_pgdata:

@@ -1,0 +1,254 @@
+// DutyHive — database schema (Phase 2).
+//
+// Two database connections:
+//   url       → DATABASE_URL          → connects as `dutyhive_app` (BYPASSRLS=false)
+//                                       used by the application at runtime.
+//   directUrl → MIGRATE_DATABASE_URL  → connects as `dutyhive_migrate` (BYPASSRLS=true)
+//                                       used by `prisma migrate` only.
+//
+// RLS policies are NOT modelled in Prisma. They live in raw SQL migrations
+// under `prisma/migrations/<timestamp>_rls_*` so they version-control alongside
+// the schema. See docs/architecture/rls-strategy.md.
+//
+// Better Auth tables (User, Session, Account, Verification, Organization,
+// Member, Invitation, Team, plus 2FA columns) were generated with the
+// `@better-auth/cli generate` command and then hand-tuned for our additional
+// fields. Re-run the CLI when upgrading better-auth — diff the output before
+// committing.
+
+generator client {
+  provider = "prisma-client-js"
+  // Output to the workspace-root `.prisma/client` so the hoisted
+  // `@prisma/client` package (which does `export * from ".prisma/client/default"`)
+  // resolves correctly from any package in the monorepo. Pointing inside
+  // packages/db's own node_modules breaks resolution from auth/audit because
+  // pnpm hoists @prisma/client to the root.
+  output   = "../../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("MIGRATE_DATABASE_URL")
+}
+
+model User {
+  id               String         @id
+  name             String
+  email            String
+  emailVerified    Boolean        @default(false)
+  image            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  twoFactorEnabled Boolean?       @default(false)
+  sessions         Session[]
+  accounts         Account[]
+  members          Member[]
+  invitations      Invitation[]
+  twofactors       TwoFactor[]
+  auditEntries     AuditEntry[]
+  legalConsents    LegalConsent[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeOrganizationId String?
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Organization {
+  id           String       @id
+  name         String
+  slug         String
+  logo         String?
+  createdAt    DateTime
+  metadata     String?
+  // Foundation-eigene Felder (extend the better-auth-generated baseline).
+  legalName    String?
+  countryCode  String       @default("AT")
+  austriaUid   String?
+  members      Member[]
+  invitations  Invitation[]
+  auditEntries AuditEntry[]
+
+  @@unique([slug])
+  @@map("organization")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("invitation")
+}
+
+model TwoFactor {
+  id          String   @id
+  secret      String
+  backupCodes String
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified    Boolean? @default(true)
+
+  @@index([secret])
+  @@index([userId])
+  @@map("twoFactor")
+}
+
+// ----------------------------------------------------------------------------
+// Foundation-eigene Modelle.
+// ----------------------------------------------------------------------------
+
+// AuditEntry — append-only audit trail.
+//
+// Behavioral rules enforced by the database (see RLS migration 0002_rls_baseline):
+//   • `dutyhive_app` has only INSERT privilege on this table — never UPDATE/DELETE.
+//   • RLS policy `tenant_isolation` scopes by `organizationId` so cross-tenant
+//     queries return zero rows and cross-tenant inserts are rejected by WITH CHECK.
+//   • Global events without an organization (e.g. `auth.signup` before org join)
+//     have `organizationId = NULL`; those rows are visible only to the migrate
+//     role in dev and to operators with direct DB access.
+//
+// PII handling: ip + user-agent are stored as sha256(salt + value), never raw.
+model AuditEntry {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  actorUserId    String?
+  actor          User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  /// `<domain>.<resource>.<verb>` — e.g. `auth.login`, `org.member.invited`.
+  action       String
+  resourceType String?
+  resourceId   String?
+
+  payload Json?
+
+  /// sha256(AUDIT_HASH_SALT + raw IP).
+  ipHash        String?
+  /// sha256(AUDIT_HASH_SALT + raw User-Agent).
+  userAgentHash String?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_entry")
+}
+
+// EmailSubscriber — newsletter with double-opt-in.
+//
+// Public-anonymous-write: no RLS policy. Anyone can request a subscription;
+// confirmation requires clicking the verification link, which sets `confirmedAt`.
+// Admin reads happen via direct DB access in Foundation; UI list view comes later.
+model EmailSubscriber {
+  id                String    @id @default(uuid()) @db.Uuid
+  /// citext to make the unique constraint case-insensitive.
+  email             String    @unique @db.Citext
+  /// Set once the user clicks the confirmation link.
+  confirmedAt       DateTime?
+  /// Set on user-initiated unsubscribe.
+  unsubscribedAt    DateTime?
+  /// BCP-47 locale string ("de-AT", "en", …) so we can localize the next mail.
+  locale            String    @default("de-AT")
+  /// Where the signup originated — `landing.hero`, `footer`, etc.
+  source            String?
+  /// Token sent in the verification mail. Null after confirmation.
+  confirmationToken String?   @unique
+  createdAt         DateTime  @default(now())
+
+  @@index([confirmedAt])
+  @@map("email_subscriber")
+}
+
+// LegalConsent — versioned acceptance of legal documents (AGB, Datenschutz).
+//
+// One row per (user, document, version). RLS policy `user_self_read` lets the
+// owner read their own consents; cross-user reads require operator access.
+model LegalConsent {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// `agb` | `datenschutz` | `dpa`.
+  documentKey String
+  /// Semver-style: `2026-05-04` or `1.0.0`. Document version registry lives in docs/legal/.
+  version     String
+  /// sha256(AUDIT_HASH_SALT + raw IP) of the request that captured the consent.
+  ipHash      String?
+  acceptedAt  DateTime @default(now())
+
+  @@unique([userId, documentKey, version])
+  @@index([documentKey, version])
+  @@map("legal_consent")
+}

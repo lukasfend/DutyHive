@@ -1,6 +1,6 @@
 {
   "name": "dutyhive",
-  "version": "0.1.0-foundation.0",
+  "version": "0.1.0-foundation.2",
   "private": true,
   "description": "DutyHive — SaaS platform for healthcare shift work and operational tools (working name).",
   "license": "UNLICENSED",
@@ -14,9 +14,12 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "turbo run test:e2e",
-    "test:rls": "turbo run test:rls",
+    "test:rls": "vitest run --project @dutyhive/db",
+    "check:rls": "tsx infra/scripts/check-rls-coverage.ts",
+    "test:all": "pnpm typecheck && pnpm lint && pnpm test && pnpm check:rls",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css,html}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css,html}\"",
     "clean": "turbo run clean && rm -rf node_modules",
@@ -28,23 +31,24 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@better-auth/cli": "^1.4.21",
     "@commitlint/cli": "19.6.1",
     "@commitlint/config-conventional": "19.6.0",
+    "@types/pg": "^8.20.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "husky": "9.1.7",
     "lint-staged": "15.5.0",
+    "pg": "^8.20.0",
     "prettier": "3.4.2",
+    "tsx": "^4.21.0",
     "turbo": "2.3.3",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vitest": "^3.2.4"
   },
-  "lint-staged": {
-    "*.{ts,tsx,js,jsx}": [
-      "prettier --write"
-    ],
-    "*.{json,md,yml,yaml,css,html}": [
-      "prettier --write"
-    ],
-    "*.prisma": [
-      "prettier --write"
-    ]
+  "pnpm": {
+    "overrides": {
+      "@prisma/client": "6.19.3",
+      "prisma": "6.19.3"
+    }
   }
 }

@@ -1,12 +1,15 @@
 /**
- * @dutyhive/auth — Foundation Phase 2 implementation:
- *   - server.ts:       betterAuth() instance with prismaAdapter + organization plugin
- *   - client.ts:       createAuthClient() React hooks + cross-subdomain cookie config
- *   - with-tenant.ts:  withAuthContext(req, fn) — RLS-aware transaction wrapper
- *   - permissions.ts:  role -> ability mapping
+ * @dutyhive/auth — public surface.
  *
- * Cross-subdomain cookie domain `.${NEXT_PUBLIC_ROOT_DOMAIN}` lets the same session
- * be valid on app.*, planner.*, business.*, checklist.*.
+ * Subpath exports do the heavy lifting; this barrel re-exports the bits that
+ * are safe in any context (types, role helpers).
+ *
+ * For runtime imports use the dedicated subpaths:
+ *   import { auth } from '@dutyhive/auth/server'      // Next.js server only
+ *   import { authClient } from '@dutyhive/auth/client' // browser
+ *   import { withAuthContext } from '@dutyhive/auth/with-tenant' // server actions
  */
-
-export const FOUNDATION_PHASE_NOTE = 'Phase 2 wires Better Auth + RLS bridge + cross-sub cookies.';
+export type { Role } from './permissions';
+export { ROLES, isRole } from './permissions';
+export { UnauthorizedError } from './with-tenant';
+export type { AuthContext } from './with-tenant';

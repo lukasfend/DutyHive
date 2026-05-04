@@ -24,7 +24,11 @@ const ServerEnvSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be ≥32 chars'),
   BETTER_AUTH_URL: z.string().url(),
 
-  /* Resend transactional + newsletter. */
+  /* SMTP (dev: mailpit on localhost:1025; prod: typically unused, replaced by Resend). */
+  SMTP_HOST: z.string().default('localhost'),
+  SMTP_PORT: z.coerce.number().int().positive().default(1025),
+
+  /* Resend transactional + newsletter (prod). */
   RESEND_API_KEY: z.string().startsWith('re_').optional(),
   RESEND_FROM: z.string().email().default('noreply@dutyhive.com'),
 

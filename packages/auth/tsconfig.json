@@ -1,9 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
+  // No rootDir/outDir — these packages are consumed by source via Next 16's
+  // transpilePackages, so they never emit. tsc runs `--noEmit` for type checking.
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

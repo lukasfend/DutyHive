@@ -44,7 +44,7 @@
   - Application role `dutyhive_app` has `BYPASSRLS = false`.
   - `withAuthContext` wrapper is the only blessed path to tenant-scoped queries.
 - **Residual:** low.
-- **Owner:** principal. **Status:** open (gate to be implemented in Phase 2). **Last review:** 2026-05-04.
+- **Owner:** principal. **Status:** mitigated (CI gate active, Phase 2). **Last review:** 2026-05-04.
 
 ### R-0003 — Brute-force on login endpoint
 
@@ -64,11 +64,11 @@
 - **Likelihood:** low (requires DB compromise).
 - **Impact:** high (forensic blindness).
 - **Mitigations:**
-  - DB role `dutyhive_app` has only INSERT on `audit_entry`, never UPDATE / DELETE.
-  - Backups snapshot the audit table.
+  - DB role `dutyhive_app` has SELECT and INSERT only on `audit_entry`. UPDATE and DELETE are REVOKED (migration `20260504184311_audit_entry_revoke_writes`). Verified by integration tests in `packages/db/src/__tests__/rls.test.ts`.
+  - Backups snapshot the audit table (Phase 7).
   - Future: append-only object-storage shipping of audit entries (post-Foundation).
-- **Residual:** medium.
-- **Owner:** principal. **Status:** open (role grants enforced in Phase 2). **Last review:** 2026-05-04.
+- **Residual:** medium (mitigation is database-only; physical DB compromise still possible).
+- **Owner:** principal. **Status:** mitigated (granular grants enforced in Phase 2). **Last review:** 2026-05-04.
 
 ### R-0005 — PII leak via logs / Sentry
 
@@ -159,6 +159,7 @@ _(none yet — register established 2026-05-04)_
 
 ## Review log
 
-| Date       | Reviewer  | Changes                                                  |
-| ---------- | --------- | -------------------------------------------------------- |
-| 2026-05-04 | principal | Initial register established with R-0001 through R-0011. |
+| Date       | Reviewer  | Changes                                                                                                                                                                    |
+| ---------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-04 | principal | Initial register established with R-0001 through R-0011.                                                                                                                   |
+| 2026-05-04 | principal | Phase 2 closeout: R-0002 status → mitigated (CI gate `check-rls-coverage.ts` active). R-0004 status → mitigated (audit_entry granular grants enforced + integration test). |
