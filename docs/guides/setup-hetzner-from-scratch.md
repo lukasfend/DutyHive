@@ -72,7 +72,10 @@ Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't ba
 | Trigger.dev Free          | Trigger.dev | Jobs       | €0            |
 | **Sum**                   |             |            | **~€29–31**   |
 
-> Hetzner reshuffled their VPS lineup — the old CX22 / CPX21 were retired and replaced by **CX23** (2 vCPU Intel/AMD, 4 GB, 40 GB, €4.79/mo, **Cost-Optimized tier with "Limited availability"** badge — older hardware, can be sold out) and **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo, Regular Performance tier). If `CX23` is unavailable when you provision, fall back to **CAX11** (Arm64 Ampere, 2 vCPU, 4 GB, 40 GB, €5.39/mo) — same shape, ARM instead of x86. Coolify, Beszel, and the Docker images we use all run on ARM64 fine. For db-01, if you have headroom in the budget, **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) gives Postgres meaningful breathing room over CPX22.
+> **Fallbacks if the recommended SKUs are sold out or under-spec'd:**
+>
+> - `CX23` is in the **Cost-Optimized** tier with a "Limited availability" badge (older hardware). If sold out at order time, switch the architecture toggle to **Arm64 (Ampere®)** and pick **CAX11** (2 vCPU, 4 GB, 40 GB, €5.39/mo) — same shape, ARM instead of x86. Coolify, Beszel, and the Docker images we use all run on ARM64 fine.
+> - For `db-01`, if you have headroom in the budget, **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) gives Postgres meaningful breathing room over CPX22. For sustained-load production once you have real users, **CCX13** (Dedicated General Purpose, 2 vCPU AMD, 8 GB, 80 GB, €19.19/mo) gives you a non-shared CPU.
 
 Domain registration (`dutyhive.com`) is already paid through Vercel Registrar — no monthly Hetzner cost for it.
 
@@ -233,17 +236,24 @@ Hetzner's **Cloud Network** lets all VPS in the project talk over a private subn
 
 > **Critical Hetzner behaviour we learned the hard way:** Hetzner Cloud Firewalls filter **every** network interface attached to a VPS — public AND private. A rule `Allow TCP/22 from <YOUR_IP>/32` on a firewall attached to `app-01` blocks SSH from `mgmt-01`'s private IP `10.0.1.1`, because `10.0.1.1` is not in the allowlist. Symptom: ICMP works (firewall has a separate `0.0.0.0/0` ICMP rule), TCP/22 returns Connection refused. The fix is an explicit `Allow ANY from 10.0.0.0/16` rule on every firewall whose box needs to talk to the others over the private network.
 
-We use **three** firewalls so each box's exposure is tailored to its role:
+We use **three** firewalls, attached to boxes via **label selectors** rather than manual server-by-server picking. Set the right labels on a VPS at provisioning time and the matching firewall auto-attaches — same for every future box you add (`app-02`, `jobs-01`, `lb-01`). No more "did I remember to tick the firewall?" check at order time.
 
-| Firewall        | Boxes                   | Public ingress                                     | Private ingress                |
-| --------------- | ----------------------- | -------------------------------------------------- | ------------------------------ |
-| `edge-mgmt`     | mgmt-01                 | SSH from `<YOUR_IP>/32`, ICMP                      | all TCP/UDP from `10.0.0.0/16` |
-| `edge-app`      | app-01, app-02+ (later) | HTTP/HTTPS from anywhere, ICMP — **no public SSH** | all TCP/UDP from `10.0.0.0/16` |
-| `edge-internal` | db-01, jobs-01 (later)  | ICMP only — **no public TCP/UDP**                  | all TCP/UDP from `10.0.0.0/16` |
+The label scheme uses two dimensions:
+
+- **`role`** — granular box identity (`mgmt`, `app`, `db`, `jobs`, `lb`). Used for inventory, Beszel grouping, and Coolify deploy targeting.
+- **`tier`** — firewall exposure class (`mgmt`, `app`, `internal`). One label per firewall; multiple roles can share a tier (e.g. `db` and `jobs` are both `tier=internal`).
+
+Plus **`env=prod`** so a future staging environment (`env=staging`) can have its own firewall set without touching prod rules.
+
+| Firewall        | Label selector (Apply to) | Boxes that match               | Public ingress                                     | Private ingress                |
+| --------------- | ------------------------- | ------------------------------ | -------------------------------------------------- | ------------------------------ |
+| `edge-mgmt`     | `tier=mgmt, env=prod`     | mgmt-01                        | SSH from `<YOUR_IP>/32`, ICMP                      | all TCP/UDP from `10.0.0.0/16` |
+| `edge-app`      | `tier=app, env=prod`      | app-01, app-02+, lb-01 (later) | HTTP/HTTPS from anywhere, ICMP — **no public SSH** | all TCP/UDP from `10.0.0.0/16` |
+| `edge-internal` | `tier=internal, env=prod` | db-01, jobs-01 (later)         | ICMP only — **no public TCP/UDP**                  | all TCP/UDP from `10.0.0.0/16` |
 
 Outbound rules: leave the defaults (allow all) on every firewall.
 
-**Why split:** if we used one firewall with all rules merged, the HTTP/HTTPS rule needed for `app-01` would also expose those ports on `db-01`. Per-box exposure is what `edge-internal` enforces — db-01 has no business listening publicly on anything.
+**Why split:** if we used one firewall with all rules merged, the HTTP/HTTPS rule needed for `app-01` would also expose those ports on `db-01`. Per-tier exposure is what `edge-internal` enforces — db-01 has no business listening publicly on anything.
 
 **Why `Allow ANY from 10.0.0.0/16`:** the private network is supposed to be the trust boundary. UFW on each box (Phase D.5) plus per-service binding (`pg_hba.conf` on db-01, etc.) does the fine-grained filtering. The Hetzner firewall's job here is "private network = trusted, public = scoped".
 
@@ -261,7 +271,8 @@ Outbound rules: leave the defaults (allow all) on every firewall.
    | `10.0.0.0/16`     | UDP      | `any` | All UDP from private network |
 
 4. **Outbound rules**: leave defaults (allow all).
-5. Save.
+5. **Apply to → Label Selector**: enter `tier=mgmt, env=prod`. The firewall now auto-attaches to any VPS in this project carrying both labels.
+6. Save.
 
 ### B.5 Create `edge-app`
 
@@ -277,9 +288,10 @@ Outbound rules: leave the defaults (allow all) on every firewall.
    | `10.0.0.0/16`     | TCP      | `any` | All TCP from private (incl. SSH from mgmt) |
    | `10.0.0.0/16`     | UDP      | `any` | All UDP from private                       |
 
-4. Save.
+4. **Apply to → Label Selector**: `tier=app, env=prod`.
+5. Save.
 
-Note: **no rule for SSH from a public source.** The only way to SSH `app-01` is via `mgmt-01` over the private network (Phase E). When we add `app-02`, `app-03`, etc., they all attach to this firewall and inherit the same exposure.
+Note: **no rule for SSH from a public source.** The only way to SSH `app-01` is via `mgmt-01` over the private network (Phase E). When `app-02`, `app-03`, or `lb-01` are added later with `tier=app, env=prod` labels, they attach to this firewall automatically and inherit the same exposure.
 
 ### B.6 Create `edge-internal`
 
@@ -293,9 +305,10 @@ Note: **no rule for SSH from a public source.** The only way to SSH `app-01` is 
    | `10.0.0.0/16`     | TCP      | `any` | All TCP from private (SSH, Postgres, jobs) |
    | `10.0.0.0/16`     | UDP      | `any` | All UDP from private                       |
 
-4. Save.
+4. **Apply to → Label Selector**: `tier=internal, env=prod`.
+5. Save.
 
-This box has zero public TCP/UDP ingress. Everything goes via the private network.
+Boxes with `tier=internal, env=prod` (db-01, jobs-01 later) get zero public TCP/UDP ingress. Everything goes via the private network.
 
 ---
 
@@ -320,16 +333,19 @@ Order: `mgmt-01` first, then `app-01`, then `db-01`. Hetzner assigns private IPs
    - Public IPv6: ✓
    - Private network: select `internal`. Hetzner auto-assigns an IP — note it (should be `10.0.1.1`).
 6. **SSH keys**: select `infra-admin`. **Critical** — if you forget this, Hetzner injects no key and you're stuck on the web console.
-7. **Volumes**: none.
-8. **Firewalls**: select **`edge-mgmt`**.
+7. **Volumes**: none. (Postgres data on `db-01` lives on the local disk for Foundation; revisit when disk hits ~70% — see "Operational runbooks → add a volume to db-01".)
+8. **Firewalls**: leave empty — `edge-mgmt` will auto-attach via the label selector once the labels in step 11 are set. Verify after creation in **Server details → Firewalls**.
 9. **Backups**: enabled (€0.76/mo, 20% surcharge — recommended for Coolify config).
 10. **Placement groups**: skip.
-11. **Labels**: `role=mgmt`, `env=prod`.
+11. **Labels** (this is what triggers firewall auto-attachment, get them right):
+    - `role=mgmt`
+    - `tier=mgmt`
+    - `env=prod`
 12. **Cloud config**: leave empty (we harden manually in Phase D).
 13. **Name**: `mgmt-01`.
 14. **Create & Buy now**. Wait ~30 seconds for the box to boot.
 
-Note the assigned **public IPv4** in the server details page — `<MGMT_PUBLIC_IP>` from now on. Confirm in **Server details → Network → Private networks** that the assigned private IP is `10.0.1.1`.
+Note the assigned **public IPv4** in the server details page — `<MGMT_PUBLIC_IP>` from now on. Confirm in **Server details → Network → Private networks** that the assigned private IP is `10.0.1.1`. Also confirm in **Server details → Firewalls** that `edge-mgmt` is attached (label-selector match).
 
 ### C.2 Order `app-01` (Next.js)
 
@@ -337,12 +353,15 @@ Same as C.1 with these differences:
 
 - **Image**: Standard → `Ubuntu 24.04` (NOT the Coolify App image — that's mgmt-only).
 - **Type**: **Shared Resources → Regular Performance** → **CPX22** (2 vCPU AMD, 4 GB RAM, 80 GB disk, €9.59/mo). If you're already expecting heavier traffic, **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) is the next step up.
-- **Firewalls**: select **`edge-app`** (NOT `edge-mgmt`).
+- **Firewalls**: leave empty — `edge-app` auto-attaches via labels.
 - **Backups**: enabled.
-- **Labels**: `role=app`, `env=prod`.
+- **Labels**:
+  - `role=app`
+  - `tier=app`
+  - `env=prod`
 - **Name**: `app-01`.
 
-Note its public IPv4 as `<APP_PUBLIC_IP>` and confirm private IP is `10.0.1.2`.
+Note its public IPv4 as `<APP_PUBLIC_IP>` and confirm private IP is `10.0.1.2`. Verify `edge-app` is attached in **Server details → Firewalls**.
 
 ### C.3 Order `db-01` (Postgres)
 
@@ -350,12 +369,15 @@ Same as C.1 with these differences:
 
 - **Image**: Standard → `Ubuntu 24.04`.
 - **Type**: **Shared Resources → Regular Performance** → **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo) for Foundation budget. Postgres is RAM-hungry — if you can spend the extra €7, choose **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) instead. For sustained load production, **CCX13** (Dedicated, 2 vCPU AMD, 8 GB, 80 GB, €19.19/mo) gives you a non-shared CPU.
-- **Firewalls**: select **`edge-internal`** (NOT `edge-mgmt`).
+- **Firewalls**: leave empty — `edge-internal` auto-attaches via labels.
 - **Backups**: enabled (this is the box you most want backed up).
-- **Labels**: `role=db`, `env=prod`.
+- **Labels**:
+  - `role=db`
+  - `tier=internal`
+  - `env=prod`
 - **Name**: `db-01`.
 
-Note `<DB_PUBLIC_IP>` (you'll rarely use it — db-01 has no public ingress) and confirm private IP is `10.0.1.3`.
+Note `<DB_PUBLIC_IP>` (you'll rarely use it — db-01 has no public ingress) and confirm private IP is `10.0.1.3`. Verify `edge-internal` is attached in **Server details → Firewalls**.
 
 ### C.4 First-login sanity check
 
@@ -1512,7 +1534,8 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 - [ ] UFW is enabled on all three VPS with the rules from D.5.
 - [ ] Postgres `listen_addresses` is the private IP only (not `*`).
 - [ ] `pg_hba.conf` allows only `10.0.1.2/32` (app-01) — no `0.0.0.0/0`.
-- [ ] Hetzner Cloud Firewall split is in place (`edge-mgmt`, `edge-app`, `edge-internal` each attached to the right boxes).
+- [ ] Hetzner Cloud Firewall split is in place: `edge-mgmt` (selector `tier=mgmt, env=prod`), `edge-app` (selector `tier=app, env=prod`), `edge-internal` (selector `tier=internal, env=prod`). Each box's **Server details → Firewalls** shows exactly the expected one attached via label match.
+- [ ] All three boxes have the three required labels (`role`, `tier`, `env`) — visible in **Server details → Labels**.
 - [ ] Local `~/.ssh/config` has `mgmt`, `app`, `db` aliases (E.1).
 
 ### Compliance
@@ -1577,14 +1600,27 @@ Common cause: Cloudflare proxy turned ON without ALPN-compatible cert mode. Set 
 
 ### Routine: add a new server to the fleet
 
-The roadmap table in the Overview reserves IPs and firewall assignments for `jobs-01`, `app-02+`, `lb-01`. To add one:
+The roadmap table in the Overview reserves IPs for `jobs-01`, `app-02+`, `lb-01`. The label scheme from B.3 means firewall attachment is automatic — you just need the right labels.
 
-1. Provision the VPS in Hetzner Console with the matching firewall (`edge-app` for app-02, `edge-internal` for jobs-01).
+1. Provision the VPS in Hetzner Console. **Firewalls**: leave empty. **Labels**: pick the row from this map and apply all three:
+
+   | Box              | `role` | `tier`   | Auto-attached firewall |
+   | ---------------- | ------ | -------- | ---------------------- |
+   | app-02+          | app    | app      | `edge-app`             |
+   | lb-01            | lb     | app      | `edge-app`             |
+   | jobs-01          | jobs   | internal | `edge-internal`        |
+   | db-02            | db     | internal | `edge-internal`        |
+   | a future bastion | mgmt   | mgmt     | `edge-mgmt`            |
+
+   Plus `env=prod`. Verify the firewall attached after creation in **Server details → Firewalls** (label-selector match should be instant).
+
 2. Confirm its private IP matches the reserved slot in the roadmap (or update the roadmap if Hetzner gave a different one).
-3. Run Phase D (D.1–D.8) on the new box via Hetzner web console.
-4. Add an entry to your local `~/.ssh/config` matching the alias pattern in E.1.
+3. Run Phase D (D.1–D.8) on the new box via Hetzner web console (no public SSH on app/internal tiers — bastion-only by design).
+4. Add an entry to your local `~/.ssh/config` matching the alias pattern in E.1, with `ProxyJump mgmt`.
 5. If it needs to talk to db-01, add a `hostssl all all <NEW_BOX_PRIVATE_IP>/32 scram-sha-256` line to `pg_hba.conf` (G.3) and reload Postgres.
 6. If Coolify deploys to it, add it as a Server in Coolify (H.4 pattern).
+
+A future **staging environment** spins up the same box shapes with `env=staging` instead of `prod`, plus a parallel set of `edge-mgmt-staging` / `edge-app-staging` / `edge-internal-staging` firewalls (selectors `tier=*, env=staging`). Prod and staging firewalls don't cross-attach.
 
 ---
 
