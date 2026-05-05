@@ -21,20 +21,41 @@ This guide is the canonical reference for **Phase 6 (Provisioning & First Deploy
         ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
         │   mgmt-01    │    │   app-01     │    │    db-01     │
         │   CX22       │    │   CPX21      │    │   CPX21      │
-        │   Coolify    │◄──►│   Next.js    │───►│  Postgres 17 │
-        │   Beszel hub │    │   (deployed) │    │ internal-only │
-        └──────┬───────┘    └──────────────┘    └──────────────┘
-               │ weekly Coolify config backup    daily pg_dump
-               ▼                                  GPG-encrypted
-                          ┌────────────────────┐
-                          │  Storage Box BX11  │
-                          │  (Hetzner)         │
-                          └────────────────────┘
+        │   Coolify    │    │   Next.js    │    │  Postgres 17 │
+        │   Beszel hub │    │   (deployed) │    │  no public   │
+        │   bastion    │    │              │    │  ingress     │
+        └──────┬───────┘    └──────┬───────┘    └──────┬───────┘
+               │                    │                    │
+               │              [Web traffic goes          │
+               │               directly to app-01,       │
+               │               NOT via mgmt-01]          │
+               │                                         │
+               └──── private network (10.0.0.0/24) ──────┘
+
+        Storage Box BX11   ←── nightly pg_dump (GPG)   from db-01
+                            ←── weekly Coolify config from mgmt-01
 
         External:  Resend EU (mail) · Sentry EU (errors) · Trigger.dev (jobs)
 ```
 
-### What you'll buy (one-off + monthly)
+Public web traffic (HTTP/HTTPS) hits `app-01:443` directly — Cloudflare DNS resolves the apex and every subdomain to `<APP_PUBLIC_IP>`. The bastion (`mgmt-01`) only sees admin SSH, Coolify deploys, and migration tunnels. If `mgmt-01` is down, the app keeps serving traffic; only deploys and admin work pause.
+
+### Server roles + scaling roadmap
+
+The Foundation runs on three VPS. Future boxes attach to the same private network so adding a fourth or fifth server never requires re-IPing the existing fleet.
+
+| Box     | Phase       | Role                                                | Spec         | Private IP | Public ingress (Cloud Firewall)     |
+| ------- | ----------- | --------------------------------------------------- | ------------ | ---------- | ----------------------------------- |
+| mgmt-01 | Foundation  | Coolify + Beszel hub + SSH bastion                  | CX22         | 10.0.0.2   | SSH from `<YOUR_IP>/32`             |
+| app-01  | Foundation  | Next.js production                                  | CPX21        | 10.0.0.3   | HTTP / HTTPS public                 |
+| db-01   | Foundation  | Postgres 17                                         | CPX21        | 10.0.0.4   | none (private only)                 |
+| jobs-01 | post-launch | Self-hosted Trigger.dev / cron / worker services    | CPX21        | 10.0.0.5   | HTTPS public (dashboard + webhooks) |
+| app-02+ | scale-out   | Additional Next.js instances behind a load balancer | CPX21        | 10.0.0.6+  | HTTP / HTTPS public                 |
+| lb-01   | scale-out   | Load balancer (Hetzner-managed LB or HAProxy VPS)   | LB11 / CPX11 | 10.0.0.10  | HTTP / HTTPS public                 |
+
+Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't bake the brand into the infrastructure layer. Network and firewall names DO carry the brand prefix where convenient; renaming them is a cosmetic Hetzner Console change with no operational impact.
+
+### What you'll buy (Foundation only, monthly)
 
 | Item                      | Provider    | Type       | ~Cost / month |
 | ------------------------- | ----------- | ---------- | ------------- |
@@ -43,7 +64,7 @@ This guide is the canonical reference for **Phase 6 (Provisioning & First Deploy
 | `db-01` CPX21             | Hetzner     | VPS        | €7.55         |
 | Storage Box BX11 (1 TB)   | Hetzner     | Backup     | €3.95         |
 | Object Storage            | Hetzner     | S3 (pay)   | ~€1–2         |
-| Cloud Firewall + vSwitch  | Hetzner     | included   | €0            |
+| Cloud Firewalls + Network | Hetzner     | included   | €0            |
 | Cloudflare DNS + WAF Free | Cloudflare  | DNS        | €0            |
 | Cloudflare Email Routing  | Cloudflare  | Mail relay | €0            |
 | Resend Free               | Resend      | Mail send  | €0            |
@@ -93,7 +114,7 @@ If you pick PowerShell, run `Start-Service ssh-agent` once before the first `ssh
 - Commands prefixed with `local$` run on **your laptop** in a POSIX shell (Linux, macOS, WSL, Git Bash).
 - Commands prefixed with `local-ps>` are the **Windows PowerShell** equivalent and only appear when the POSIX line doesn't work as-is.
 - Commands prefixed with `mgmt$`, `app$`, `db$` run on **that specific VPS** as a non-root user.
-- Commands prefixed with `mgmt#`, `app#`, `db#` run on that VPS as **root** (via `sudo -i` after the initial root login).
+- Commands prefixed with `mgmt#`, `app#`, `db#` run on that VPS as **root** (via `sudo -i` after the initial root login, or via Hetzner web console for boxes that have no public SSH yet).
 - Replace `<…>` placeholders with real values before pasting.
 
 ---
@@ -102,7 +123,7 @@ If you pick PowerShell, run `Start-Service ssh-agent` once before the first `ssh
 
 ### A.1 Verify billing and the project
 
-1. Open `https://console.hetzner.cloud` → **Default** project (or create a new project named `DutyHive` to keep resources isolated).
+1. Open `https://console.hetzner.cloud` → **Default** project (or create a new project to keep resources isolated; name it whatever you want — the box names below don't depend on the project name).
 2. Confirm billing is active under **Settings → Billing → Payment method**.
 3. Note the project ID (top of the URL, looks like `1234567`) — you may need it for the `hcloud` CLI later.
 
@@ -142,6 +163,8 @@ local-ps> ssh-add $HOME\.ssh\dutyhive_admin_ed25519
 3. Name: `dutyhive-admin`.
 4. Save. Hetzner shows a fingerprint — verify it matches the one from `ssh-keygen -lf ~/.ssh/dutyhive_admin_ed25519.pub`.
 
+> **Why this matters:** if you forget to attach this key when provisioning a VPS in Phase C, Hetzner injects nothing into `/root/.ssh/authorized_keys` and your only way in is the web console (clunky) or the root password emailed by Hetzner. Always tick the SSH-key box at order time.
+
 ### A.4 (Optional) Install the `hcloud` CLI
 
 The CLI lets you script provisioning. Not required for this guide, but useful for re-runs.
@@ -171,13 +194,13 @@ local$ hcloud context create dutyhive
 
 ---
 
-## Phase B — Network infrastructure (Cloud Firewall + Private Network)
+## Phase B — Networking foundation
 
-We create the firewall rules and the private network **before** ordering VPS so we can attach them at provisioning time.
+This phase creates the Private Network and **three** Cloud Firewalls before we order any VPS. Provisioning a box later attaches it to the right firewall in one click.
 
 ### B.1 Get your home/office IP address
 
-We'll lock SSH ingress to your IP only.
+We'll lock the bastion's public SSH ingress to your IP only.
 
 ```bash
 local$ curl -s https://api.ipify.org
@@ -187,11 +210,11 @@ local$ curl -s https://api.ipify.org
 local-ps> Invoke-RestMethod https://api.ipify.org
 ```
 
-Note the IPv4 address. If your ISP gives you a dynamic IP, you'll have to update the firewall rule when it changes — keep the IP detection command handy.
+Note the IPv4 address (`<YOUR_IP>` from now on). If your ISP gives you a dynamic IP, you'll have to update the firewall rule when it changes — keep the IP detection command handy.
 
 ### B.2 Create the Private Network
 
-Hetzner's **Cloud Network** lets the three VPS talk over a 10.x.x.x subnet without exposing ports to the public internet.
+Hetzner's **Cloud Network** lets all VPS in the project talk over a private subnet without exposing ports to the public internet. We use a **/16 outer range** so we have room for additional subnets later (e.g. staging, multi-region) and a **/24 subnet** for the production fleet.
 
 1. Hetzner Console → **Networks → Create Network**.
 2. **Name**: `dutyhive-internal`.
@@ -199,38 +222,86 @@ Hetzner's **Cloud Network** lets the three VPS talk over a 10.x.x.x subnet witho
 4. **Add subnet**:
    - **Type**: Cloud
    - **Network zone**: `eu-central` (Falkenstein FSN1).
-   - **IP range**: `10.0.1.0/24`.
+   - **IP range**: `10.0.0.0/24`.
 5. Save.
 
-You'll attach each VPS to this network in Phase C.
+> **Hetzner reserves `10.0.0.1` as the gateway** for the subnet. VPS attached afterwards get IPs starting from `10.0.0.2`. The `/16` umbrella means a future second subnet (e.g. `10.0.1.0/24` for staging) shares the same network and routes between subnets without extra setup.
 
-### B.3 Create the Cloud Firewall
+### B.3 Cloud-Firewall design — read this first
 
-The firewall is a stateful packet filter at the Hetzner edge.
+> **Critical Hetzner behaviour we learned the hard way:** Hetzner Cloud Firewalls filter **every** network interface attached to a VPS — public AND private. A rule `Allow TCP/22 from <YOUR_IP>/32` on a firewall attached to `app-01` blocks SSH from `mgmt-01`'s private IP `10.0.0.2`, because `10.0.0.2` is not in the allowlist. Symptom: ICMP works (firewall has a separate `0.0.0.0/0` ICMP rule), TCP/22 returns Connection refused. The fix is an explicit `Allow ANY from 10.0.0.0/16` rule on every firewall whose box needs to talk to the others over the private network.
+
+We use **three** firewalls so each box's exposure is tailored to its role:
+
+| Firewall        | Boxes                   | Public ingress                                     | Private ingress                |
+| --------------- | ----------------------- | -------------------------------------------------- | ------------------------------ |
+| `edge-mgmt`     | mgmt-01                 | SSH from `<YOUR_IP>/32`, ICMP                      | all TCP/UDP from `10.0.0.0/16` |
+| `edge-app`      | app-01, app-02+ (later) | HTTP/HTTPS from anywhere, ICMP — **no public SSH** | all TCP/UDP from `10.0.0.0/16` |
+| `edge-internal` | db-01, jobs-01 (later)  | ICMP only — **no public TCP/UDP**                  | all TCP/UDP from `10.0.0.0/16` |
+
+Outbound rules: leave the defaults (allow all) on every firewall.
+
+**Why split:** if we used one firewall with all rules merged, the HTTP/HTTPS rule needed for `app-01` would also expose those ports on `db-01`. Per-box exposure is what `edge-internal` enforces — db-01 has no business listening publicly on anything.
+
+**Why `Allow ANY from 10.0.0.0/16`:** the private network is supposed to be the trust boundary. UFW on each box (Phase D.5) plus per-service binding (`pg_hba.conf` on db-01, etc.) does the fine-grained filtering. The Hetzner firewall's job here is "private network = trusted, public = scoped".
+
+### B.4 Create `edge-mgmt`
 
 1. Hetzner Console → **Firewalls → Create Firewall**.
-2. **Name**: `dutyhive-edge`.
-3. **Inbound rules** — replace `<YOUR_IP>` with the address from B.1:
+2. **Name**: `edge-mgmt`.
+3. **Inbound rules**:
 
-   | Source            | Protocol | Port  | Notes                               |
-   | ----------------- | -------- | ----- | ----------------------------------- |
-   | `<YOUR_IP>/32`    | TCP      | `22`  | SSH from you                        |
-   | `0.0.0.0/0, ::/0` | TCP      | `80`  | HTTP (redirects to HTTPS on app-01) |
-   | `0.0.0.0/0, ::/0` | TCP      | `443` | HTTPS                               |
-   | `0.0.0.0/0, ::/0` | ICMP     | —     | Ping (debugging)                    |
+   | Source            | Protocol | Port  | Notes                        |
+   | ----------------- | -------- | ----- | ---------------------------- |
+   | `<YOUR_IP>/32`    | TCP      | `22`  | Your SSH from your home IP   |
+   | `0.0.0.0/0, ::/0` | ICMP     | —     | Ping debugging               |
+   | `10.0.0.0/16`     | TCP      | `any` | All TCP from private network |
+   | `10.0.0.0/16`     | UDP      | `any` | All UDP from private network |
 
-4. **Outbound rules**: leave the defaults (allow all).
+4. **Outbound rules**: leave defaults (allow all).
 5. Save.
 
-We'll apply this firewall to the public network interfaces of `mgmt-01`, `app-01`, and `db-01` at order time. The Private Network does **not** flow through this firewall — VPS-to-VPS traffic stays internal and unfiltered.
+### B.5 Create `edge-app`
+
+1. **Firewalls → Create Firewall**.
+2. **Name**: `edge-app`.
+3. **Inbound rules**:
+
+   | Source            | Protocol | Port  | Notes                                      |
+   | ----------------- | -------- | ----- | ------------------------------------------ |
+   | `0.0.0.0/0, ::/0` | TCP      | `80`  | HTTP (redirects to HTTPS on app)           |
+   | `0.0.0.0/0, ::/0` | TCP      | `443` | HTTPS                                      |
+   | `0.0.0.0/0, ::/0` | ICMP     | —     | Ping debugging                             |
+   | `10.0.0.0/16`     | TCP      | `any` | All TCP from private (incl. SSH from mgmt) |
+   | `10.0.0.0/16`     | UDP      | `any` | All UDP from private                       |
+
+4. Save.
+
+Note: **no rule for SSH from a public source.** The only way to SSH `app-01` is via `mgmt-01` over the private network (Phase E). When we add `app-02`, `app-03`, etc., they all attach to this firewall and inherit the same exposure.
+
+### B.6 Create `edge-internal`
+
+1. **Firewalls → Create Firewall**.
+2. **Name**: `edge-internal`.
+3. **Inbound rules**:
+
+   | Source            | Protocol | Port  | Notes                                      |
+   | ----------------- | -------- | ----- | ------------------------------------------ |
+   | `0.0.0.0/0, ::/0` | ICMP     | —     | Ping debugging                             |
+   | `10.0.0.0/16`     | TCP      | `any` | All TCP from private (SSH, Postgres, jobs) |
+   | `10.0.0.0/16`     | UDP      | `any` | All UDP from private                       |
+
+4. Save.
+
+This box has zero public TCP/UDP ingress. Everything goes via the private network.
 
 ---
 
 ## Phase C — Provision the three VPS
 
-Order in this sequence: `mgmt-01` first (we'll bootstrap from it), then `app-01`, then `db-01`.
+Order: `mgmt-01` first, then `app-01`, then `db-01`. Hetzner assigns private IPs in the order of attachment to the network — first attaches to `10.0.0.2`, second to `10.0.0.3`, etc.
 
-### C.1 Order `mgmt-01` (Coolify + Beszel hub)
+### C.1 Order `mgmt-01` (Coolify + Beszel hub + bastion)
 
 1. Hetzner Console → **Servers → Add Server**.
 2. **Location**: `Falkenstein` (FSN1).
@@ -239,10 +310,10 @@ Order in this sequence: `mgmt-01` first (we'll bootstrap from it), then `app-01`
 5. **Networking**:
    - Public IPv4: ✓
    - Public IPv6: ✓
-   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (likely `10.0.1.1`).
-6. **SSH keys**: select `dutyhive-admin`.
+   - Private network: select `dutyhive-internal`. Hetzner auto-assigns an IP — note it (should be `10.0.0.2`).
+6. **SSH keys**: select `dutyhive-admin`. **Critical** — if you forget this, Hetzner injects no key and you're stuck on the web console.
 7. **Volumes**: none.
-8. **Firewalls**: select `dutyhive-edge`.
+8. **Firewalls**: select **`edge-mgmt`**.
 9. **Backups**: enabled (€0.76/mo, 20% surcharge — recommended for Coolify config).
 10. **Placement groups**: skip.
 11. **Labels**: `role=mgmt`, `env=prod`.
@@ -250,57 +321,75 @@ Order in this sequence: `mgmt-01` first (we'll bootstrap from it), then `app-01`
 13. **Name**: `mgmt-01`.
 14. **Create & Buy now**. Wait ~30 seconds for the box to boot.
 
-Note the assigned **public IPv4** in the server details page. You'll use it as `<MGMT_PUBLIC_IP>` from now on.
+Note the assigned **public IPv4** in the server details page — `<MGMT_PUBLIC_IP>` from now on. Confirm in **Server details → Network → Private networks** that the assigned private IP is `10.0.0.2`.
 
 ### C.2 Order `app-01` (Next.js)
 
 Same as C.1 with these differences:
 
 - **Type**: shared vCPU **AMD** → **CPX21** (3 vCPU, 4 GB RAM, 80 GB disk).
-- Note the private IP (likely `10.0.1.2`).
+- **Firewalls**: select **`edge-app`** (NOT `edge-mgmt`).
 - **Backups**: enabled.
 - **Labels**: `role=app`, `env=prod`.
 - **Name**: `app-01`.
 
-Note its public IPv4 as `<APP_PUBLIC_IP>`.
+Note its public IPv4 as `<APP_PUBLIC_IP>` and confirm private IP is `10.0.0.3`.
 
 ### C.3 Order `db-01` (Postgres)
 
 Same as C.1 with these differences:
 
-- **Type**: shared vCPU **AMD** → **CPX21**.
-- Private IP (likely `10.0.1.3`).
+- **Type**: CPX21.
+- **Firewalls**: select **`edge-internal`** (NOT `edge-mgmt`).
 - **Backups**: enabled (this is the box you most want backed up).
 - **Labels**: `role=db`, `env=prod`.
 - **Name**: `db-01`.
 
-Note the public IPv4 as `<DB_PUBLIC_IP>`.
+Note `<DB_PUBLIC_IP>` (you'll rarely use it — db-01 has no public ingress) and confirm private IP is `10.0.0.4`.
 
 ### C.4 First-login sanity check
 
+Only `mgmt-01` is publicly SSH-able. Try it:
+
+```bash
+local$ ssh root@<MGMT_PUBLIC_IP> 'echo OK; hostname'
+```
+
+If this prompts for a password, the SSH key wasn't injected — fix in **Server Details → SSH keys**, attach `dutyhive-admin`, then `ssh-keygen -R <MGMT_PUBLIC_IP>` locally to clear the old fingerprint, then retry.
+
+`app-01` and `db-01` have **no public SSH ingress** by design (their firewalls don't allow it). To verify they booted, log in via Hetzner's web console (Server details → **Console**) — login is `root` and the password from Hetzner's email.
+
+While in the web console on each box, take note of:
+
+```bash
+ip -4 addr show          # confirm both eth0 (public) and enp7s0 (private) show IPs
+hostname                  # should match what you named the box
+cat /root/.ssh/authorized_keys     # confirm your key is here
+```
+
+If the private interface is missing, the network attachment didn't go through — re-check the server's **Network** tab in the Hetzner Console and reattach.
+
+If `/root/.ssh/authorized_keys` is empty, Hetzner didn't inject the key. Paste the contents of your local `~/.ssh/dutyhive_admin_ed25519.pub` into it now (`mkdir -p /root/.ssh && chmod 700 /root/.ssh && cat >> /root/.ssh/authorized_keys` then paste, then `chmod 600 /root/.ssh/authorized_keys`).
+
+### C.5 Verify private network connectivity
+
+From mgmt-01:
+
 ```bash
 local$ ssh root@<MGMT_PUBLIC_IP>
-local$ ssh root@<APP_PUBLIC_IP>
-local$ ssh root@<DB_PUBLIC_IP>
+mgmt#  ping -c 2 10.0.0.3      # should reach app-01
+mgmt#  ping -c 2 10.0.0.4      # should reach db-01
 ```
 
-If any one prompts for a password, the SSH key wasn't applied — recheck **Server Details → SSH keys**, attach `dutyhive-admin`, then `ssh-keygen -R <IP>` locally to clear the old fingerprint.
-
-While logged in to each box, verify the private network is up:
-
-```bash
-mgmt#  ip -4 addr show enp7s0     # or `ip addr show` to see all interfaces
-mgmt#  ping -c 2 10.0.1.2        # should reach app-01
-mgmt#  ping -c 2 10.0.1.3        # should reach db-01
-```
-
-If `ping` fails, the Private Network attachment didn't go through — re-check the server's Network tab in Hetzner Console.
+Ping should succeed. This only verifies ICMP — TCP services aren't running yet, that's Phase D's job. If ping fails, the private network attachment is broken — retry the Network step in Hetzner Console.
 
 ---
 
-## Phase D — SSH hardening (run on each of the three VPS)
+## Phase D — Bootstrap each VPS (SSH hardening + UFW + fail2ban)
 
-Do this on `mgmt-01`, then `app-01`, then `db-01`. Each box gets the same treatment.
+Run all of D.1–D.9 on **`mgmt-01` first** (you'll lose root login at the end of D.3, so we do mgmt-01 first to verify the pattern works before locking ourselves out of the other boxes), then on `app-01`, then on `db-01`.
+
+For `app-01` and `db-01`, you start each session via the web console — once their `deploy` user is set up, sshd is hardened, and the local SSH config in Phase E lands, you'll switch to `ssh app` / `ssh db` over the private network for any further work.
 
 ### D.1 System update + base tools
 
@@ -308,7 +397,7 @@ Do this on `mgmt-01`, then `app-01`, then `db-01`. Each box gets the same treatm
 mgmt#  apt update && apt upgrade -y
 mgmt#  apt install -y \
          curl wget git vim ufw fail2ban unattended-upgrades \
-         ca-certificates gnupg lsb-release rsync htop tmux jq
+         ca-certificates gnupg lsb-release rsync htop tmux jq tcpdump
 ```
 
 ### D.2 Create a non-root user
@@ -323,7 +412,7 @@ mgmt#  chmod 700 /home/deploy/.ssh
 mgmt#  chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-Sanity-check from your laptop **before** disabling root login:
+Sanity-check from your laptop **before** disabling root login (mgmt only — for app/db you do this from inside the web console):
 
 ```bash
 local$ ssh deploy@<MGMT_PUBLIC_IP> 'whoami && sudo -n true && echo OK'
@@ -332,7 +421,7 @@ local$ ssh deploy@<MGMT_PUBLIC_IP> 'whoami && sudo -n true && echo OK'
 
 If that works, continue.
 
-### D.3 Lock down SSH (`/etc/ssh/sshd_config.d/99-dutyhive.conf`)
+### D.3 Lock down sshd (`/etc/ssh/sshd_config.d/99-dutyhive.conf`)
 
 ```bash
 mgmt#  cat > /etc/ssh/sshd_config.d/99-dutyhive.conf <<'EOF'
@@ -348,11 +437,27 @@ ClientAliveCountMax 2
 MaxAuthTries 3
 AllowUsers deploy
 EOF
-mgmt#  sshd -t        # syntax check
-mgmt#  systemctl reload ssh
+mgmt#  sshd -t        # syntax check — must print nothing
 ```
 
-Test from your laptop in a **second** terminal — keep the root session open until you confirm `deploy` login works:
+Don't reload sshd yet — that comes after D.4.
+
+### D.4 Disable Ubuntu's socket-activated SSH
+
+Ubuntu 24.04 ships SSH as a **socket-activated** unit (`ssh.socket`) instead of a long-running service. On Hetzner's image we've seen this manifest as private-network connections being TCP-RST'd silently — even with no UFW, no iptables, and `sshd` listening on `0.0.0.0:22`. The cause is a filter (`IPAccessAllow=`/`SocketBindAllow=` style) on the socket unit that limits which clients reach sshd. ICMP works (no TCP path), TCP/22 returns "Connection refused", and you spend hours bisecting.
+
+The cleanest fix is to take socket activation out of the picture and run `sshd` as a normal long-lived service:
+
+```bash
+mgmt#  systemctl disable --now ssh.socket
+mgmt#  systemctl mask ssh.socket
+mgmt#  systemctl enable --now ssh.service
+mgmt#  systemctl reload ssh.service           # picks up the 99-dutyhive.conf from D.3
+mgmt#  systemctl status ssh.service           # active (running)
+mgmt#  ss -tlnp | grep ':22'                   # owner column shows ONLY sshd, not systemd
+```
+
+If `ss -tlnp` previously showed `users:(("sshd",...),("systemd",...))` and now shows only `sshd`, the switch worked. Now test from your laptop in a **second** terminal — keep the root web-console / root SSH session open until you confirm `deploy` login works:
 
 ```bash
 local$ ssh deploy@<MGMT_PUBLIC_IP>     # should land you in /home/deploy
@@ -361,59 +466,77 @@ local$ ssh root@<MGMT_PUBLIC_IP>       # should be REJECTED
 
 Once verified, exit the root session.
 
-### D.4 UFW (host firewall in addition to Hetzner Cloud Firewall)
+> **Why we do this even though "ssh.socket" is the modern Ubuntu default:** socket activation hides one extra filtering layer between the network and `sshd` where opaque defaults can apply. For a small fleet (<10 boxes) the resource savings of socket activation are negligible, while the predictability of `ssh.service` directly listening on the wire is worth a lot when debugging. Re-enable socket activation later if you have a measured reason to.
+
+### D.5 UFW (host firewall in addition to Hetzner Cloud Firewall)
+
+Defence in depth. The Hetzner firewall (Phase B) is the outer perimeter; UFW on the box is the inner one.
 
 ```bash
 mgmt$ sudo ufw default deny incoming
 mgmt$ sudo ufw default allow outgoing
 mgmt$ sudo ufw allow OpenSSH
-mgmt$ sudo ufw allow 80/tcp
-mgmt$ sudo ufw allow 443/tcp
-# Allow private-network traffic so mgmt-01 can SSH to app-01/db-01:
-mgmt$ sudo ufw allow from 10.0.1.0/24
-mgmt$ sudo ufw enable                  # type 'y' to confirm
+mgmt$ sudo ufw allow from 10.0.0.0/16    # all private-network traffic
+mgmt$ sudo ufw enable                    # type 'y' to confirm
 mgmt$ sudo ufw status verbose
 ```
 
-On `app-01` and `db-01`, identical, plus on `db-01` allow Postgres only on the private network:
+For **`app-01`**: same as above, plus:
 
 ```bash
-db$  sudo ufw allow from 10.0.1.0/24 to any port 5432 proto tcp
+app$  sudo ufw allow 80/tcp
+app$  sudo ufw allow 443/tcp
 ```
 
-### D.5 Fail2ban (default `sshd` jail is enabled by package)
+For **`db-01`**: same as the mgmt-01 base (no public 80/443 needed). The `allow from 10.0.0.0/16` line is what lets `app-01` reach Postgres on `5432` and lets you SSH via mgmt-jump.
+
+### D.6 fail2ban
+
+The default `sshd` jail ships enabled by the package — verify:
 
 ```bash
 mgmt$ sudo systemctl enable --now fail2ban
 mgmt$ sudo fail2ban-client status sshd
 ```
 
-### D.6 Unattended security upgrades
+Public-internet bots will hammer your `mgmt-01:22` constantly. fail2ban bans IPs after 5 failed attempts (default 10 min). Once Phase D.4 is in place, brute-force attempts get `Permission denied (publickey)` immediately — they never reach PAM — and fail2ban bans them out of the way.
+
+### D.7 Unattended security upgrades
 
 ```bash
 mgmt$ sudo dpkg-reconfigure --priority=low unattended-upgrades   # answer Yes
 mgmt$ cat /etc/apt/apt.conf.d/50unattended-upgrades              # confirm only -security is enabled
 ```
 
-### D.7 Set timezone (optional but useful for log correlation)
+### D.8 Set timezone
 
 ```bash
 mgmt$ sudo timedatectl set-timezone Europe/Vienna
 ```
 
-Repeat **steps D.1 through D.7** on `app-01` and `db-01` before continuing to D.8.
+### D.9 Repeat on the other boxes
 
-### D.8 Local SSH config — bastion pattern via `mgmt-01`
+Repeat **D.1–D.8** on `app-01` and `db-01`. For these boxes:
 
-Once all three boxes have a `deploy` user and root login is disabled, set up a single SSH config block on **your laptop** so that:
+- You start each step via the **Hetzner web console** (no public SSH yet).
+- D.4 (ssh.socket → ssh.service) is just as critical here, even though you can't currently SSH from outside — once Phase E lands, `mgmt → app/db:22` over the private network will fail in the same way without it.
+- After D.5 (UFW) is enabled with `allow from 10.0.0.0/16`, leave the web console.
+
+---
+
+## Phase E — Local SSH config (bastion via mgmt-01)
+
+Once all three boxes have a `deploy` user, root login is disabled, and `ssh.service` is running, set up a single SSH config block on **your laptop** so that:
 
 - `ssh mgmt` → direct to `mgmt-01` over its public IP.
-- `ssh app` → jumps through `mgmt-01` and lands on `app-01` over the private network (`10.0.1.2`).
-- `ssh db` → jumps through `mgmt-01` and lands on `db-01` over the private network (`10.0.1.3`).
+- `ssh app` → jumps through `mgmt-01` and lands on `app-01` over the private network (`10.0.0.3`).
+- `ssh db` → jumps through `mgmt-01` and lands on `db-01` over the private network (`10.0.0.4`).
 
-This is the same topology Coolify uses internally to deploy to `app-01` (G.4): `mgmt-01` is the bastion, and the two work boxes only need to be reachable from the private network. The ProxyJump alias also makes the `pg_dump` / Prisma-migrate flows in F.7 and the routine ops runbooks one short word instead of an IP-and-tunnel pile.
+This is the same topology Coolify uses internally to deploy to `app-01` (Phase H.4): `mgmt-01` is the bastion, the work boxes are reachable only from the private network.
 
-Append to `~/.ssh/config` (POSIX) or `$HOME\.ssh\config` (Windows — create the file if it doesn't exist). Replace `<MGMT_PUBLIC_IP>` with the value from C.1.
+### E.1 Append to `~/.ssh/config`
+
+POSIX (`~/.ssh/config`) or Windows (`$HOME\.ssh\config` — create the file if it doesn't exist). Replace `<MGMT_PUBLIC_IP>` with the value from C.1.
 
 ```ssh-config
 # DutyHive — Hetzner production
@@ -424,7 +547,7 @@ Host mgmt
   IdentitiesOnly yes
   ServerAliveInterval 60
 
-Host app db
+Host app db jobs
   User deploy
   IdentityFile ~/.ssh/dutyhive_admin_ed25519
   IdentitiesOnly yes
@@ -432,10 +555,13 @@ Host app db
   ServerAliveInterval 60
 
 Host app
-  HostName 10.0.1.2
+  HostName 10.0.0.3
 
 Host db
-  HostName 10.0.1.3
+  HostName 10.0.0.4
+
+Host jobs
+  HostName 10.0.0.5    # populated when jobs-01 lands post-launch
 ```
 
 OpenSSH on Windows expands `~` to `$env:USERPROFILE`, so the same `IdentityFile ~/.ssh/dutyhive_admin_ed25519` line works in both shells — no backslashes needed inside the config.
@@ -450,7 +576,7 @@ local$ chmod 600 ~/.ssh/config
 local-ps> icacls $HOME\.ssh\config /inheritance:r /grant:r "$($env:USERNAME):F"
 ```
 
-Smoke test:
+### E.2 Smoke test
 
 ```bash
 local$ ssh mgmt 'whoami && hostname'   # → deploy / mgmt-01
@@ -464,52 +590,55 @@ local-ps> ssh app  'whoami; hostname'
 local-ps> ssh db   'whoami; hostname'
 ```
 
-If `ssh app` or `ssh db` fails, the failure mode usually pinpoints the cause:
+### E.3 Verify the bastion topology
 
-- **`Could not resolve hostname mgmt`** — the `Host mgmt` block isn't being read. `ssh -G mgmt | head` shows the effective config; if `hostname` is still `mgmt`, OpenSSH didn't see your edit. Confirm the file path matches what `ssh -F /dev/null -G mgmt` _doesn't_ see (i.e. the default is being used).
-- **`Permission denied (publickey)` after the jump connects** — `app-01`'s or `db-01`'s `deploy` user doesn't have your public key. Re-run D.2 on the offending box, or copy the key over via the still-working hop:
-  ```bash
-  local$ ssh-copy-id -o ProxyJump=mgmt deploy@10.0.1.2
-  ```
-- **`Connection timed out`** when the jump itself fails — UFW or the Hetzner firewall is blocking. Confirm UFW allows `10.0.1.0/24` (D.4) and that each VPS shows `Network attached` in the Hetzner Console under **Networks**.
-- **`channel 0: open failed: administratively prohibited`** — sshd on `mgmt-01` has `AllowTcpForwarding no` (it doesn't by default in our D.3 config, but check if you changed it).
-
-### D.9 (Optional but recommended) Lock down public SSH on `app-01` and `db-01`
-
-Once D.8 is verified, remove the public SSH path to the two work boxes. After this change, the **only** way into `app-01` or `db-01` is via `mgmt-01` as a jump host — which is exactly the topology Coolify, your migration tunnel (F.7), and your nightly backup script (L.2) already use.
-
-You have two options. Pick one:
-
-**Option A — narrow the existing firewall rule (one-line change):**
-
-1. Hetzner Console → **Firewalls → dutyhive-edge → Edit**.
-2. Inbound SSH rule: change source from `<YOUR_IP>/32` to `<MGMT_PUBLIC_IP>/32`. Now only mgmt-01's public IP is allowed to hit port 22 on any box that has this firewall.
-3. Re-add a separate rule for SSH from `<YOUR_IP>/32` and apply it **only to `mgmt-01`** (Hetzner firewalls can be applied per-server) — this is what gives you direct `ssh mgmt` while still blocking direct SSH to the two work boxes.
-
-**Option B — split the firewall (cleaner long-term):**
-
-1. Create `dutyhive-mgmt-edge`: inbound SSH from `<YOUR_IP>/32`, outbound default. Apply only to `mgmt-01`.
-2. Create `dutyhive-app-edge`: inbound HTTP/HTTPS `0.0.0.0/0,::/0`, **no SSH from public**. Apply to `app-01`. (db-01 needs neither, so attach `dutyhive-app-edge` minus the HTTP/HTTPS rules, or simply leave no firewall and rely on UFW + the private-network listener.)
-3. Detach `dutyhive-edge` from `app-01` and `db-01` once the new firewalls are attached and verified.
-
-Verify the lockdown from your laptop:
+Confirm that direct public SSH to `app-01` and `db-01` is impossible:
 
 ```bash
-local$ ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>   # should time out or be refused
-local$ ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>    # should time out or be refused
-local$ ssh app 'echo OK'                                # should still succeed via mgmt
-local$ ssh db  'echo OK'                                # should still succeed via mgmt
+local$ ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>     # should time out (edge-app blocks)
+local$ ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>      # should time out (edge-internal blocks)
+local$ ssh app 'echo OK'                                  # should succeed via mgmt jump
+local$ ssh db  'echo OK'                                  # should succeed via mgmt jump
 ```
 
-If both refusals and both successes hold, the bastion topology is enforced.
+If both refusals and both successes hold: the bastion topology is enforced. mgmt-01 is the only door to the fleet.
 
-> **Why this matters:** even if your laptop SSH key leaks, an attacker can only land on `mgmt-01`. `db-01` — the box that holds organisation/audit data once products go live — is one extra hop, one extra audit log entry, and one extra firewall change away. The cost of D.9 is one firewall edit; the value is a real defence-in-depth boundary.
+### E.4 Troubleshooting — `ssh app` / `ssh db` refused or hangs
+
+If something fails, the failure mode usually pinpoints the cause. Run these diagnostics:
+
+**On mgmt:**
+
+```bash
+mgmt$ ping -c 2 10.0.0.3                                   # private network reachability
+mgmt$ nc -zv 10.0.0.3 22                                   # TCP/22 reachability
+mgmt$ ssh -v -o ConnectTimeout=5 deploy@10.0.0.3 2>&1 | head -20
+```
+
+**On the target box** (via web console if you can't SSH yet):
+
+```bash
+app#  ufw status
+app#  iptables -L INPUT -n -v --line-numbers
+app#  nft list ruleset 2>/dev/null
+app#  ss -tlnp | grep ':22'
+app#  systemctl status ssh.service
+```
+
+Map of likely findings → fix:
+
+- **mgmt ping fails too** → private network not attached, or routing not converged. Re-attach in Hetzner Console, reboot the box.
+- **mgmt ping ✓, mgmt nc refused, app `ss` shows sshd + systemd as owners** → ssh.socket filter is rejecting. Apply Phase D.4 on the target box.
+- **mgmt ping ✓, mgmt nc refused, app firewalls all empty, ss shows only sshd** → packet capture next: `tcpdump -i enp7s0 -n -c 6 port 22` on the target while running `nc -zv` on mgmt. If SYN arrives but no SYN-ACK leaves, sshd isn't accepting on the private interface — check `ListenAddress` lines in `/etc/ssh/sshd_config*`.
+- **mgmt ping ✓, mgmt nc ✓, but `ssh app` still fails** → SSH-layer issue (host-key mismatch, key not in `authorized_keys` on app, AllowUsers misspelled). Run `ssh -vvv` from mgmt and read the failure point.
+
+The most common failure on a fresh Hetzner Ubuntu 24.04 box is the ssh.socket one (D.4). It's the one that wasted the most hours during this project's bootstrap.
 
 ---
 
-## Phase E — Storage Box + Object Storage
+## Phase F — Storage Box + Object Storage
 
-### E.1 Order Storage Box BX11
+### F.1 Order Storage Box BX11
 
 1. Hetzner Robot console (separate from Cloud!): `https://robot.hetzner.com` → **Storage Boxes → Order**.
 2. **Type**: BX11 (1 TB, €3.95/mo).
@@ -523,7 +652,7 @@ Once provisioned (1–5 minutes), open it:
 - Set a **password** (Storage Box → Settings → Set/Change password). Save in the password manager.
 - Enable **SSH access** in the same settings page.
 
-### E.2 Create a dedicated SSH key for Storage Box uploads
+### F.2 Create a dedicated SSH key for Storage Box uploads
 
 Use a separate key from the admin key so a compromised app server can't trivially read backups offline.
 
@@ -539,7 +668,7 @@ local-ps> ssh-keygen -t ed25519 -C "dutyhive-backups@<host>" -f $HOME\.ssh\dutyh
 
 Add the public key in **Storage Box → SSH Keys → Add public key**.
 
-### E.3 Object Storage bucket (for static assets, future user uploads)
+### F.3 Object Storage bucket (for static assets, future user uploads)
 
 1. Hetzner Cloud Console → **Object Storage → Create Project**.
 2. **Name**: `dutyhive-prod`.
@@ -551,13 +680,14 @@ Object Storage is pay-per-use; expect €1–2/mo for Foundation traffic.
 
 ---
 
-## Phase F — Postgres 17 on `db-01`
+## Phase G — Postgres 17 on `db-01`
 
 We install Postgres directly on `db-01`. No Docker on this box — keeping the database close to the metal simplifies tuning, backups, and upgrades.
 
-### F.1 Install Postgres 17 from the PGDG repo
+### G.1 Install Postgres 17 from the PGDG repo
 
 ```bash
+local$ ssh db
 db$  sudo install -d /usr/share/postgresql-common/pgdg
 db$  sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
        https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -568,12 +698,12 @@ db$  sudo apt update
 db$  sudo apt install -y postgresql-17 postgresql-contrib-17
 ```
 
-### F.2 Bind Postgres to the private network only
+### G.2 Bind Postgres to the private network only
 
-Get `db-01`'s private IP (should be `10.0.1.3`):
+Get `db-01`'s private IP (should be `10.0.0.4`):
 
 ```bash
-db$  ip -4 addr show | grep '10.0.'
+db$  ip -4 addr show enp7s0
 ```
 
 Edit `/etc/postgresql/17/main/postgresql.conf`:
@@ -585,16 +715,16 @@ db$  sudo vim /etc/postgresql/17/main/postgresql.conf
 Change:
 
 ```conf
-listen_addresses = '10.0.1.3'         # private IP of db-01 — never set to '*'
+listen_addresses = '10.0.0.4'         # private IP of db-01 — never set to '*'
 port = 5432
 ssl = on
-ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'      # snakeoil first; replace in F.5
+ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'      # snakeoil first; replace in G.5
 ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'
 ```
 
-The Hetzner Cloud Firewall rules from Phase B already block public access to port 5432; the `listen_addresses` setting is defence in depth.
+The `edge-internal` firewall rules from Phase B already block public access to port 5432 (no public TCP rules at all); the `listen_addresses` setting is defence in depth.
 
-### F.3 Restrict `pg_hba.conf` to the app server only
+### G.3 Restrict `pg_hba.conf` to the app server only
 
 Edit `/etc/postgresql/17/main/pg_hba.conf` and **replace** the default `host all all all md5` line with:
 
@@ -606,22 +736,24 @@ db$  sudo vim /etc/postgresql/17/main/pg_hba.conf
 # TYPE  DATABASE          USER              ADDRESS         METHOD
 local   all               postgres                          peer
 local   all               all                               peer
-hostssl all               all               10.0.1.2/32    scram-sha-256
-hostssl replication       all               10.0.1.2/32    scram-sha-256
+hostssl all               all               10.0.0.3/32    scram-sha-256
+hostssl replication       all               10.0.0.3/32    scram-sha-256
 # Reject any other host explicitly so a misconfigured listen_addresses can't leak.
 host    all               all               0.0.0.0/0       reject
 host    all               all               ::/0            reject
 ```
+
+When `app-02` joins later, add `hostssl all all 10.0.0.6/32 scram-sha-256` (or the broader `10.0.0.0/24`). Keep the allowlist explicit per box rather than blanket-allowing the subnet — defence in depth.
 
 Reload Postgres:
 
 ```bash
 db$  sudo systemctl restart postgresql@17-main
 db$  sudo -u postgres psql -c "SHOW listen_addresses;"
-db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.1.3:5432 is listening
+db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.0.4:5432 is listening
 ```
 
-### F.4 Create roles + database + extensions
+### G.4 Create roles + database + extensions
 
 Generate two strong random passwords now (in your password manager):
 
@@ -660,7 +792,7 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 EOF
 ```
 
-### F.5 Replace the snakeoil TLS cert with a real one (Let's Encrypt or self-signed CA)
+### G.5 Replace the snakeoil TLS cert with a real one
 
 For Foundation we use a self-signed cert; the cert chain is shared with `app-01` out of band. For a public-CA cert, follow the same steps but plug in `certbot certonly --standalone` on the box temporarily.
 
@@ -681,60 +813,52 @@ db$  sudo sed -i \
 db$  sudo systemctl restart postgresql@17-main
 ```
 
-Copy the cert to `app-01` so the Node `pg` driver trusts it:
+Copy the cert to `app-01` so the Node `pg` driver trusts it. From your laptop:
 
 ```bash
-db$   sudo cat /etc/postgresql/17/main/server.crt
-# copy the PEM block, then on app-01:
-app$  sudo install -d /etc/dutyhive
-app$  sudo tee /etc/dutyhive/db-ca.crt > /dev/null <<'EOF'
------BEGIN CERTIFICATE-----
-... paste here ...
------END CERTIFICATE-----
-EOF
-app$  sudo chmod 644 /etc/dutyhive/db-ca.crt
+local$ ssh db 'sudo cat /etc/postgresql/17/main/server.crt' > /tmp/db-ca.crt
+local$ scp /tmp/db-ca.crt app:/tmp/
+local$ ssh app
+app$   sudo install -d /etc/dutyhive
+app$   sudo install -m 644 /tmp/db-ca.crt /etc/dutyhive/db-ca.crt
 ```
 
 The connection string used by the app will set `?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt`.
 
-### F.6 Smoke-test the connection from `app-01`
+### G.6 Smoke-test the connection from `app-01`
 
 ```bash
 local$ ssh app
-app$   sudo apt install -y postgresql-client-17
-app$   PGPASSWORD='<APP_DB_PASSWORD>' psql \
-         "host=10.0.1.3 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
-         -c "SELECT current_user, current_database();"
+app$  sudo apt install -y postgresql-client-17
+app$  PGPASSWORD='<APP_DB_PASSWORD>' psql \
+        "host=10.0.0.4 dbname=dutyhive_prod user=dutyhive_app sslmode=require" \
+        -c "SELECT current_user, current_database();"
 # expected output:
 #  current_user   | current_database
 # ----------------+------------------
 #  dutyhive_app   | dutyhive_prod
 ```
 
-If this fails: check `pg_hba.conf` (F.3), check the firewall (`sudo ufw status` on db-01), check `listen_addresses`. Walk back the chain.
+If this fails: check `pg_hba.conf` (G.3), check the firewall (`sudo ufw status` on db-01), check `listen_addresses`. Walk back the chain.
 
-### F.7 Apply Prisma migrations against prod
+### G.7 Apply Prisma migrations against prod
 
-From your laptop (or a CI runner once Phase 6+ adds GitHub Actions), with the `MIGRATE_DATABASE_URL` pointing at db-01.
+`db-01` is **not** publicly reachable on 5432 — that's the point. Two ways to run migrations, in order of preference:
 
-`db-01` is **not** publicly reachable on 5432 — that's the point. Three ways to run migrations, in order of preference:
-
-1. **SSH-tunnel from your laptop via `mgmt-01`** (recommended for the first deploy and ongoing routine migrations). The `mgmt` alias from D.8 makes this a one-liner:
+1. **SSH-tunnel from your laptop via `mgmt-01`** (recommended for the first deploy and ongoing routine migrations). The `mgmt` alias from E.1 makes this a one-liner:
 
    ```bash
-   local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
+   local$ ssh -L 5432:10.0.0.4:5432 -N mgmt &
    local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require' \
             pnpm --filter @dutyhive/db exec prisma migrate deploy
    local$ kill %1   # close the tunnel
    ```
 
-   Without the alias, the equivalent is `ssh -L 5432:10.0.1.3:5432 -N deploy@<MGMT_PUBLIC_IP> -i ~/.ssh/dutyhive_admin_ed25519 &`.
-
    On Windows / PowerShell, run the tunnel in a second window instead of backgrounding it (PowerShell's `&` is the call operator, not "background"):
 
    ```powershell
    # Window 1 — leave this running:
-   local-ps> ssh -L 5432:10.0.1.3:5432 -N mgmt
+   local-ps> ssh -L 5432:10.0.0.4:5432 -N mgmt
 
    # Window 2:
    local-ps> $env:MIGRATE_DATABASE_URL = 'postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require'
@@ -743,12 +867,10 @@ From your laptop (or a CI runner once Phase 6+ adds GitHub Actions), with the `M
 
 2. **Run from `app-01`**: clone the repo there once and use it as the migration runner. Coolify can invoke this on each deploy as a pre-start hook once the build matrix grows; for Foundation, option 1 is simpler.
 
-3. **Run from `mgmt-01`**: same idea as option 2, but from the bastion. Avoid this — `mgmt-01`'s job is orchestration, not application code.
-
 After every migration run, re-check the RLS coverage gate against prod via the same tunnel:
 
 ```bash
-local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
+local$ ssh -L 5432:10.0.0.4:5432 -N mgmt &
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@localhost:5432/dutyhive_prod?sslmode=require' \
          pnpm check:rls
 local$ kill %1
@@ -756,24 +878,25 @@ local$ kill %1
 
 ---
 
-## Phase G — Coolify on `mgmt-01`
+## Phase H — Coolify on `mgmt-01`
 
 Coolify is the deploy control plane. It runs Docker, pulls the repo on `git push`, builds the Next.js standalone image, and ships it to `app-01`.
 
 ### How Coolify reaches the other boxes
 
-Coolify on `mgmt-01` talks to the rest of the infrastructure over the **Hetzner Private Network** (the `dutyhive-internal` 10.0.1.0/24 subnet from B.2). Two flows matter:
+Coolify on `mgmt-01` talks to the rest of the infrastructure over the **Hetzner Private Network** (the `dutyhive-internal` 10.0.0.0/24 subnet from B.2). Two flows matter:
 
-- **Coolify → `app-01`** for deploys: SSH from `mgmt-01` (`10.0.1.1`) to `deploy@10.0.1.2` using the dedicated key generated in G.4. UFW on `app-01` already allows `from 10.0.1.0/24` (D.4), so this works without any public SSH path.
-- **App on `app-01` → `db-01`** at runtime: TCP from `10.0.1.2` to `10.0.1.3:5432` over the private network, authenticated as `dutyhive_app` with TLS verification against the cert from F.5. `pg_hba.conf` on db-01 allows `hostssl all all 10.0.1.2/32 scram-sha-256` (F.3) and rejects everything else.
+- **Coolify → `app-01`** for deploys: SSH from `mgmt-01` (`10.0.0.2`) to `deploy@10.0.0.3` using the dedicated key generated in H.4. UFW on `app-01` already allows `from 10.0.0.0/16` (D.5), and `edge-app` permits `10.0.0.0/16` on all TCP ports — so this works without any public SSH path.
+- **App on `app-01` → `db-01`** at runtime: TCP from `10.0.0.3` to `10.0.0.4:5432` over the private network, authenticated as `dutyhive_app` with TLS verification against the cert from G.5. `pg_hba.conf` on db-01 allows `hostssl all all 10.0.0.3/32 scram-sha-256` (G.3) and rejects everything else.
 
-Coolify itself never touches db-01. The migration tunnel from F.7 is what bridges your laptop to db-01 _via_ mgmt-01 — same physical path Coolify uses, but for one-off Prisma runs instead of the long-lived runtime connection.
+Coolify itself never touches db-01. The migration tunnel from G.7 is what bridges your laptop to db-01 _via_ mgmt-01 — same physical path Coolify uses, but for one-off Prisma runs instead of the long-lived runtime connection.
 
-If you completed D.9 (public SSH locked down on app-01/db-01), the only externally reachable SSH port in the whole stack is `mgmt-01:22` — restricted to your home IP. Everything else flows over the private network.
+The only externally reachable SSH port in the whole stack is `mgmt-01:22`, restricted to your home IP via `edge-mgmt`. Everything else flows over the private network.
 
-### G.1 Install Docker (Coolify's prereq)
+### H.1 Install Docker (Coolify's prereq)
 
 ```bash
+local$ ssh mgmt
 mgmt$  sudo install -m 0755 -d /etc/apt/keyrings
 mgmt$  sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
          -o /etc/apt/keyrings/docker.asc
@@ -785,11 +908,11 @@ mgmt$  sudo apt update
 mgmt$  sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 mgmt$  sudo usermod -aG docker deploy
 mgmt$  exit
-local$ ssh deploy@<MGMT_PUBLIC_IP>     # re-login so the docker group takes effect
+local$ ssh mgmt                        # re-login so the docker group takes effect
 mgmt$  docker version                  # should print client + server versions
 ```
 
-### G.2 Install Coolify
+### H.2 Install Coolify
 
 ```bash
 mgmt$  sudo curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /tmp/coolify-install.sh
@@ -801,16 +924,18 @@ Wait ~3 minutes. The script provisions ~10 containers (Postgres, Redis, the Cool
 
 When done it prints the URL — by default `http://<MGMT_PUBLIC_IP>:8000`. Open it in a browser.
 
-### G.3 First-run Coolify setup
+> **Watch out:** Coolify exposes its UI on port 8000 by default with no auth gate before you create the first admin. Anyone hitting `<MGMT_PUBLIC_IP>:8000` in the few minutes before you finish H.3 can claim the admin account. Either do H.3 immediately, or temporarily restrict port 8000 in `edge-mgmt` to `<YOUR_IP>/32` before running H.2.
+
+### H.3 First-run Coolify setup
 
 1. Create the **root admin** account (email + strong password — save in the password manager).
 2. **Server** → click on the auto-detected `localhost` (this is `mgmt-01`).
 3. **Settings → General**:
    - **Server name**: `mgmt-01`.
-   - **Hostname**: `coolify.dutyhive.com` (we'll wire DNS in Phase H).
+   - **Hostname**: `coolify.dutyhive.com` (we'll wire DNS in Phase I).
 4. Save.
 
-### G.4 Add `app-01` as a deploy target
+### H.4 Add `app-01` as a deploy target
 
 Coolify deploys to remote servers via SSH. We add `app-01` as a "Server" in Coolify so it can ship containers there.
 
@@ -824,29 +949,28 @@ mgmt$  sudo cat /data/coolify/ssh/keys/app-01-key.pub
 Add the public key to `app-01`'s `deploy` user:
 
 ```bash
+local$ ssh app
 app$  echo '<paste-the-pubkey>' | sudo tee -a /home/deploy/.ssh/authorized_keys
 ```
-
-Allow Coolify-generated network from `mgmt-01` to reach `app-01` for SSH (already covered by the private-network UFW rule in D.4).
 
 In Coolify UI:
 
 1. **Servers → Add Server**.
 2. **Name**: `app-01`.
-3. **IP**: `10.0.1.2` (private — Coolify connects over the internal network).
+3. **IP**: `10.0.0.3` (private — Coolify connects over the internal network).
 4. **User**: `deploy`.
 5. **Port**: `22`.
 6. **SSH key**: select the `app-01-key` Coolify just generated.
 7. **Validate**. Coolify SSHes to `app-01` and confirms Docker is reachable.
 8. Save.
 
-### G.5 Connect the GitHub repo
+### H.5 Connect the GitHub repo
 
 1. Coolify UI → **Sources → GitHub Apps → Add**.
 2. Follow the OAuth flow. Grant access to `lukasfend/DutyHive`.
 3. Once connected, Coolify can pull commits and build them.
 
-### G.6 Create the application
+### H.6 Create the application
 
 1. Coolify UI → **Projects → New Project** → name `dutyhive`.
 2. Inside the project: **+ New → Application → Public Repository** (or **Private** with the GitHub source).
@@ -861,13 +985,13 @@ In Coolify UI:
    - **Start command**: `node apps/web/.next/standalone/apps/web/server.js`
    - **Port**: `3000`
 7. **Server**: `app-01`.
-8. **Environment variables** — paste the production env (Phase G.7 below).
+8. **Environment variables** — paste the production env (Phase H.7 below).
 9. **Domains**: `dutyhive.com,app.dutyhive.com,planner.dutyhive.com,business.dutyhive.com,checklist.dutyhive.com`.
-   Coolify will provision Caddy reverse-proxy entries for each. TLS comes from Let's Encrypt automatically once DNS resolves to `app-01` (Phase H).
+   Coolify will provision Caddy reverse-proxy entries for each. TLS comes from Let's Encrypt automatically once DNS resolves to `app-01` (Phase I).
 10. **Healthcheck path**: `/api/health`.
 11. **Save**. Don't deploy yet — DNS isn't ready.
 
-### G.7 Production environment variables (in Coolify's secrets store)
+### H.7 Production environment variables (in Coolify's secrets store)
 
 Generate a fresh `BETTER_AUTH_SECRET`:
 
@@ -885,13 +1009,13 @@ Paste these into Coolify's environment-variable form (each as a separate row):
 
 ```env
 NODE_ENV=production
-DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.0.1.3:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
-MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.0.1.3:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+DATABASE_URL=postgresql://dutyhive_app:<APP_DB_PASSWORD>@10.0.0.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
+MIGRATE_DATABASE_URL=postgresql://dutyhive_migrate:<MIGRATE_DB_PASSWORD>@10.0.0.4:5432/dutyhive_prod?sslmode=verify-full&sslrootcert=/etc/dutyhive/db-ca.crt
 BETTER_AUTH_SECRET=<paste-from-openssl-rand>
 BETTER_AUTH_URL=https://app.dutyhive.com
 NEXT_PUBLIC_ROOT_DOMAIN=dutyhive.com
 NEXT_PUBLIC_SITE_URL=https://dutyhive.com
-RESEND_API_KEY=<paste-after-Phase-I>
+RESEND_API_KEY=<paste-after-Phase-J>
 RESEND_FROM=noreply@dutyhive.com
 AUDIT_HASH_SALT=<openssl rand -base64 32>
 LOG_LEVEL=info
@@ -901,7 +1025,7 @@ LOG_LEVEL=info
 # NEXT_PUBLIC_SENTRY_DSN=
 # TRIGGER_SECRET_KEY=
 
-# S3 / Hetzner Object Storage (from Phase E.3)
+# S3 / Hetzner Object Storage (from Phase F.3)
 S3_ENDPOINT=<from Hetzner Object Storage>
 S3_BUCKET=dutyhive-public
 S3_ACCESS_KEY=<from Hetzner Object Storage>
@@ -910,7 +1034,7 @@ S3_SECRET_KEY=<from Hetzner Object Storage>
 
 Mark `*_SECRET`, `*_KEY`, `DATABASE_URL`, and `MIGRATE_DATABASE_URL` as **secret** in Coolify so they don't show in logs.
 
-### G.8 Mount `/etc/dutyhive/db-ca.crt` into the container
+### H.8 Mount `/etc/dutyhive/db-ca.crt` into the container
 
 Coolify → application → **Storages → New Storage** → bind-mount type:
 
@@ -920,30 +1044,26 @@ Coolify → application → **Storages → New Storage** → bind-mount type:
 
 Save.
 
-### G.9 Configure Coolify itself to be reachable on a domain (Phase H prerequisite)
-
-Coolify ships its UI on `<MGMT_PUBLIC_IP>:8000`. We'll DNS-map it to `coolify.dutyhive.com` in Phase H.5 and let Coolify auto-issue a TLS cert for itself.
-
 ---
 
-## Phase H — Cloudflare DNS migration
+## Phase I — Cloudflare DNS migration
 
 The Vercel registrar holds the domain; we move only the **nameservers** to Cloudflare so DNS, WAF, and Email Routing are managed there. Vercel keeps doing the boring registry job.
 
-### H.1 Add the domain to Cloudflare
+### I.1 Add the domain to Cloudflare
 
 1. Cloudflare Dashboard → **Add a Site → Free plan** → enter `dutyhive.com`.
 2. Cloudflare scans existing DNS records (very few from Vercel; we'll replace them).
 3. Cloudflare assigns two nameservers, e.g. `tasha.ns.cloudflare.com` and `ben.ns.cloudflare.com`. **Note both**.
 
-### H.2 Switch nameservers at Vercel
+### I.2 Switch nameservers at Vercel
 
 1. Vercel Dashboard → **Domains → dutyhive.com → Nameservers**.
 2. **Use Custom Nameservers** → paste the two from Cloudflare.
 3. Save.
 4. DNS propagation can take 1–24 hours. While we wait, configure records.
 
-### H.3 Add DNS records in Cloudflare
+### I.3 Add DNS records in Cloudflare
 
 In Cloudflare → `dutyhive.com` → **DNS → Records**:
 
@@ -959,7 +1079,7 @@ In Cloudflare → `dutyhive.com` → **DNS → Records**:
 
 Why **DNS only** (orange cloud off) initially: Coolify's Caddy issues Let's Encrypt certs via HTTP-01 challenge — the challenge needs to reach `app-01` directly, which Cloudflare's proxy would intercept. After certs issue, optionally toggle the proxy on for marketing/app subdomains.
 
-### H.4 Verify DNS resolution
+### I.4 Verify DNS resolution
 
 Once propagation completes (15 min – a few hours):
 
@@ -975,9 +1095,9 @@ local-ps> Resolve-DnsName app.dutyhive.com -Type A  | Select-Object -ExpandPrope
 local-ps> Resolve-DnsName dutyhive.com -Type NS     | Select-Object -ExpandProperty NameHost
 ```
 
-### H.5 Trigger TLS issuance
+### I.5 Trigger TLS issuance
 
-In Coolify → application → **Deploy**. Once the build finishes and Coolify's Caddy starts, it'll auto-request Let's Encrypt certs for every domain mapped in G.6. Watch the deploy log:
+In Coolify → application → **Deploy**. Once the build finishes and Coolify's Caddy starts, it'll auto-request Let's Encrypt certs for every domain mapped in H.6. Watch the deploy log:
 
 ```
 ✔ Issued certificate for dutyhive.com
@@ -985,22 +1105,22 @@ In Coolify → application → **Deploy**. Once the build finishes and Coolify's
 ...
 ```
 
-If issuance fails for one domain, that subdomain's DNS isn't pointing where Coolify thinks it is — re-check H.3.
+If issuance fails for one domain, that subdomain's DNS isn't pointing where Coolify thinks it is — re-check I.3.
 
 Visit `https://dutyhive.com` — the marketing page should render with a green padlock.
 
 ---
 
-## Phase I — Resend (transactional + newsletter mail)
+## Phase J — Resend (transactional + newsletter mail)
 
 Better Auth sends verification emails via SMTP in dev (Mailpit). Production switches to Resend's HTTP API via the Resend API key.
 
-### I.1 Add the domain in Resend
+### J.1 Add the domain in Resend
 
 1. Resend Dashboard → **Domains → Add Domain** → `dutyhive.com`.
 2. Resend shows three DNS records to add: SPF (TXT), DKIM (TXT × 2), DMARC (TXT).
 
-### I.2 Add the records in Cloudflare
+### J.2 Add the records in Cloudflare
 
 | Type  | Name                | Content                                                      | Notes                             |
 | ----- | ------------------- | ------------------------------------------------------------ | --------------------------------- |
@@ -1011,26 +1131,18 @@ Better Auth sends verification emails via SMTP in dev (Mailpit). Production swit
 
 Cloudflare → DNS → add each one. Save. Resend's verification picks up the records within a few minutes.
 
-### I.3 Verify in Resend
+### J.3 Verify in Resend
 
 Wait until each record turns green ✔ in the Resend dashboard.
 
-### I.4 Generate the Resend API key
+### J.4 Generate the Resend API key
 
 1. Resend → **API Keys → Create API Key**.
 2. **Permission**: full sending.
 3. **Domain**: `dutyhive.com`.
-4. Copy the key (starts with `re_`). **Paste into Coolify's `RESEND_API_KEY` env var** (G.7).
+4. Copy the key (starts with `re_`). **Paste into Coolify's `RESEND_API_KEY` env var** (H.7).
 
-### I.5 Switch the auth mailer to Resend in production
-
-Foundation Phase 2 hard-codes nodemailer + SMTP for dev. To use Resend in prod we'll wire the email backend in Phase 4 (`@dutyhive/email` package). Until then, leave SMTP env vars empty in production — Better Auth will skip email verification temporarily.
-
-> **TODO before commercial launch**: complete `@dutyhive/email` so production sign-up requires email verification. Track in `docs/quality/risk-register.md` R-0010.
-
-### I.6 Validate deliverability
-
-After the domain is verified, send a test:
+### J.5 Validate deliverability
 
 ```bash
 local$ curl -X POST https://api.resend.com/emails \
@@ -1050,12 +1162,12 @@ Check the recipient inbox. Then run the message through `https://www.mail-tester
 
 ---
 
-## Phase J — Cloudflare Email Routing for `support@dutyhive.com`
+## Phase K — Cloudflare Email Routing for `support@dutyhive.com`
 
 Resend sends; Cloudflare routes incoming mail to your personal inbox without us standing up an MX server.
 
 1. Cloudflare → `dutyhive.com` → **Email → Email Routing → Get started**.
-2. Cloudflare shows the MX + TXT records to add. **Stop** — these conflict with Resend's `MX send` from I.2. Cloudflare's MX is for your **incoming** apex; Resend's `send` subdomain MX is separate, so both can coexist.
+2. Cloudflare shows the MX + TXT records to add. The Resend `MX send` from J.2 and Cloudflare's apex MX coexist (different subdomains).
 
    Actual records:
 
@@ -1066,7 +1178,7 @@ Resend sends; Cloudflare routes incoming mail to your personal inbox without us 
    | `MX`  | `@`  | `route3.mx.cloudflare.net`                                         | 90       |
    | `TXT` | `@`  | `v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com -all` | —        |
 
-   Note we **merge** the SPF record (Cloudflare + Amazon SES). Replace the I.2 SPF with this combined version.
+   Note we **merge** the SPF record (Cloudflare + Amazon SES). Replace the J.2 SPF with this combined version.
 
 3. Add the records, save. Cloudflare verifies.
 4. **Routing rules → Add rule**:
@@ -1079,13 +1191,14 @@ Add additional addresses for `legal@`, `privacy@`, `press@`, `news@` mirroring t
 
 ---
 
-## Phase K — Beszel monitoring (Phase 7)
+## Phase L — Beszel monitoring (Phase 7)
 
 Beszel is a self-hosted lightweight metrics dashboard. The Hub runs on `mgmt-01`; Agents run on `app-01` and `db-01` and push metrics over the private network.
 
-### K.1 Install Beszel Hub on `mgmt-01`
+### L.1 Install Beszel Hub on `mgmt-01`
 
 ```bash
+local$ ssh mgmt
 mgmt$  curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel_linux_amd64.tar.gz \
          | tar xz beszel
 mgmt$  sudo install -o beszel -g beszel beszel /usr/local/bin/beszel || (sudo useradd -r beszel && sudo install -o beszel -g beszel beszel /usr/local/bin/beszel)
@@ -1115,13 +1228,14 @@ mgmt$  sudo systemctl daemon-reload
 mgmt$  sudo systemctl enable --now beszel
 ```
 
-Open `http://<MGMT_PUBLIC_IP>:8090` (use the SSH tunnel: `ssh -L 8090:localhost:8090 deploy@<MGMT_PUBLIC_IP>`) and create the admin account.
+Open `http://<MGMT_PUBLIC_IP>:8090` (use the SSH tunnel: `ssh -L 8090:localhost:8090 mgmt`) and create the admin account.
 
-### K.2 Install agents on `app-01` and `db-01`
+### L.2 Install agents on `app-01` and `db-01`
 
 In the Beszel UI: **Add System → System → copy the install command shown**, e.g.:
 
 ```bash
+local$ ssh app
 app$  curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel-agent_linux_amd64.tar.gz | tar xz beszel-agent
 app$  sudo install -o root -g root beszel-agent /usr/local/bin/
 app$  sudo tee /etc/systemd/system/beszel-agent.service > /dev/null <<EOF
@@ -1131,7 +1245,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.0.1.1:8090 --token <TOKEN_FROM_HUB>
+ExecStart=/usr/local/bin/beszel-agent --hub-url http://10.0.0.2:8090 --token <TOKEN_FROM_HUB>
 Restart=on-failure
 
 [Install]
@@ -1143,17 +1257,17 @@ app$  sudo systemctl enable --now beszel-agent
 
 Repeat on `db-01`. Both should appear in the Hub UI within ~30 seconds with metrics streaming.
 
-### K.3 Map Beszel to a public domain (optional)
+### L.3 Map Beszel to a public domain (optional)
 
 Add `beszel.dutyhive.com` → `<MGMT_PUBLIC_IP>` in Cloudflare DNS. In Cloudflare WAF, lock it down to your home IP (or use Cloudflare Access for SSO). Coolify can serve as the reverse proxy by adding a service entry for the Beszel port.
 
 ---
 
-## Phase L — Backups (Phase 7)
+## Phase M — Backups (Phase 7)
 
 Nightly `pg_dump` of the production database, GPG-encrypted, shipped to the Storage Box.
 
-### L.1 Generate the backup encryption key
+### M.1 Generate the backup encryption key
 
 On a **separate offline laptop or air-gapped USB** — _not_ on `db-01`:
 
@@ -1167,29 +1281,27 @@ Save the **secret key** in your password manager (export with `gpg --armor --exp
 Copy the **public key only** to `db-01`:
 
 ```bash
-local$ scp dutyhive-backups-public.asc deploy@<DB_PUBLIC_IP>:/tmp/
+local$ scp dutyhive-backups-public.asc db:/tmp/
+local$ ssh db
 db$    gpg --import /tmp/dutyhive-backups-public.asc
 db$    gpg --list-keys
 ```
 
-```powershell
-local-ps> scp .\dutyhive-backups-public.asc deploy@<DB_PUBLIC_IP>:/tmp/
-```
+### M.2 Configure SSH to the Storage Box from `db-01`
 
-### L.2 Configure SSH to the Storage Box from `db-01`
-
-Copy the backup key from E.2 to `db-01`:
+Copy the backup key from F.2 to `db-01`:
 
 ```bash
-local$ scp ~/.ssh/dutyhive_backup_ed25519 deploy@<DB_PUBLIC_IP>:/home/deploy/.ssh/
+local$ scp ~/.ssh/dutyhive_backup_ed25519 db:/home/deploy/.ssh/
+local$ ssh db
 db$    chmod 600 /home/deploy/.ssh/dutyhive_backup_ed25519
 ```
 
 ```powershell
-local-ps> scp $HOME\.ssh\dutyhive_backup_ed25519 deploy@<DB_PUBLIC_IP>:/home/deploy/.ssh/
+local-ps> scp $HOME\.ssh\dutyhive_backup_ed25519 db:/home/deploy/.ssh/
 ```
 
-Append a host alias to `~/.ssh/config`:
+Append a host alias to `~/.ssh/config` on db-01:
 
 ```bash
 db$  cat >> /home/deploy/.ssh/config <<'EOF'
@@ -1203,7 +1315,7 @@ db$  chmod 600 /home/deploy/.ssh/config
 db$  ssh storagebox 'echo OK'      # accept the host key on first connect
 ```
 
-### L.3 Backup script
+### M.3 Backup script
 
 ```bash
 db$  sudo tee /usr/local/bin/dutyhive-backup.sh > /dev/null <<'EOF'
@@ -1228,7 +1340,7 @@ sudo -u deploy scp "$DUMP_FILE" "storagebox:backups/postgres/"
 # 3. Local cleanup.
 shred -u "$DUMP_FILE"
 
-# 4. Retention: keep the last 30 daily + 12 monthly on the Storage Box.
+# 4. Retention: keep the last 30 daily on the Storage Box.
 sudo -u deploy ssh storagebox bash <<'REMOTE'
 cd backups/postgres
 ls -1 | sort | head -n -30 | grep -E '\.sql\.gz\.gpg$' | xargs -r rm --
@@ -1240,7 +1352,7 @@ db$  sudo chmod 750 /usr/local/bin/dutyhive-backup.sh
 db$  sudo chown root:root /usr/local/bin/dutyhive-backup.sh
 ```
 
-### L.4 Schedule via systemd timer
+### M.4 Schedule via systemd timer
 
 ```bash
 db$  sudo tee /etc/systemd/system/dutyhive-backup.service > /dev/null <<'EOF'
@@ -1270,7 +1382,7 @@ db$  sudo systemctl enable --now dutyhive-backup.timer
 db$  sudo systemctl list-timers | grep dutyhive
 ```
 
-### L.5 Manual smoke + restore drill (DO THIS BEFORE GOING LIVE)
+### M.5 Manual smoke + restore drill (DO THIS BEFORE GOING LIVE)
 
 ```bash
 db$  sudo systemctl start dutyhive-backup.service     # run once now
@@ -1281,7 +1393,7 @@ db$  ssh storagebox 'ls -l backups/postgres/'         # confirm file lands
 Restore drill — on a **scratch** box (or a temporary local Docker Postgres):
 
 ```bash
-local$ scp deploy@<DB_PUBLIC_IP>:/tmp/<latest>.sql.gz.gpg ./
+local$ scp db:/tmp/<latest>.sql.gz.gpg ./
 local$ gpg --decrypt <latest>.sql.gz.gpg | gunzip | psql -h localhost -U postgres dutyhive_restore_test
 local$ psql -h localhost -U postgres dutyhive_restore_test -c "SELECT count(*) FROM \"user\";"
 ```
@@ -1289,7 +1401,7 @@ local$ psql -h localhost -U postgres dutyhive_restore_test -c "SELECT count(*) F
 ```powershell
 # PowerShell can't pipe binary streams cleanly between gpg and psql. Decrypt
 # to a file first, then feed it into psql.
-local-ps> scp deploy@<DB_PUBLIC_IP>:/tmp/<latest>.sql.gz.gpg .
+local-ps> scp db:/tmp/<latest>.sql.gz.gpg .
 local-ps> gpg --decrypt --output dump.sql.gz <latest>.sql.gz.gpg
 local-ps> & 'C:\Program Files\Git\usr\bin\gzip.exe' -d dump.sql.gz   # or use 7z
 local-ps> psql -h localhost -U postgres dutyhive_restore_test -f dump.sql
@@ -1298,7 +1410,7 @@ local-ps> psql -h localhost -U postgres dutyhive_restore_test -c 'SELECT count(*
 
 If row counts match production: backups are real. Document the drill date in `docs/guides/release-checklist.md`.
 
-### L.6 Coolify config backup (weekly)
+### M.6 Coolify config backup (weekly)
 
 Coolify stores its state in `/data/coolify`. Back it up to the Storage Box:
 
@@ -1316,11 +1428,11 @@ EOF
 mgmt$  sudo chmod 750 /usr/local/bin/coolify-backup.sh
 ```
 
-Schedule a weekly timer analogous to L.4 (`OnCalendar=Sun *-*-* 04:00:00 UTC`).
+Schedule a weekly timer analogous to M.4 (`OnCalendar=Sun *-*-* 04:00:00 UTC`).
 
 ---
 
-## Phase M — Final verification checklist
+## Phase N — Final verification checklist
 
 Mark these in `docs/guides/release-checklist.md` once each is green.
 
@@ -1330,6 +1442,14 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 - [ ] `https://dutyhive.com` loads the marketing page with a valid TLS cert.
 - [ ] `https://app.dutyhive.com`, `planner.`, `business.`, `checklist.` each load with valid TLS.
 - [ ] HTTP→HTTPS redirect is in place (`curl -I http://dutyhive.com` returns 301 to https).
+
+### SSH topology
+
+- [ ] `ssh mgmt 'echo OK'` succeeds.
+- [ ] `ssh app 'echo OK'` succeeds (via mgmt jump).
+- [ ] `ssh db 'echo OK'` succeeds (via mgmt jump).
+- [ ] `ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>` times out / refused.
+- [ ] `ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>` times out / refused.
 
 ### Auth + database
 
@@ -1361,13 +1481,13 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 
 - [ ] Root login over SSH is disabled on all three VPS.
 - [ ] Password authentication over SSH is disabled on all three VPS.
+- [ ] `ssh.socket` is masked on all three VPS; `ssh.service` is enabled and running.
 - [ ] `fail2ban` jail `sshd` is active on all three VPS.
-- [ ] UFW is enabled on all three VPS with the rules from D.4.
+- [ ] UFW is enabled on all three VPS with the rules from D.5.
 - [ ] Postgres `listen_addresses` is the private IP only (not `*`).
-- [ ] `pg_hba.conf` allows only `10.0.1.2/32` (app-01) — no `0.0.0.0/0`.
-- [ ] Hetzner Cloud Firewall has SSH locked to your home IP.
-- [ ] Local `~/.ssh/config` has `mgmt`, `app`, `db` aliases (D.8); `ssh app` and `ssh db` succeed via ProxyJump.
-- [ ] (Recommended) D.9 complete — direct SSH to `<APP_PUBLIC_IP>` and `<DB_PUBLIC_IP>` is refused; only `ssh mgmt` works publicly.
+- [ ] `pg_hba.conf` allows only `10.0.0.3/32` (app-01) — no `0.0.0.0/0`.
+- [ ] Hetzner Cloud Firewall split is in place (`edge-mgmt`, `edge-app`, `edge-internal` each attached to the right boxes).
+- [ ] Local `~/.ssh/config` has `mgmt`, `app`, `db` aliases (E.1).
 
 ### Compliance
 
@@ -1391,7 +1511,7 @@ local$ git push origin main
 ### Routine: apply a Prisma migration to production
 
 ```bash
-local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
+local$ ssh -L 5432:10.0.0.4:5432 -N mgmt &
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require' \
          pnpm --filter @dutyhive/db exec prisma migrate deploy
 local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/dutyhive_prod?sslmode=require' \
@@ -1399,17 +1519,17 @@ local$ MIGRATE_DATABASE_URL='postgresql://dutyhive_migrate:<PW>@localhost:5432/d
 local$ kill %1
 ```
 
-(Windows / PowerShell: run the `ssh -L` line in its own window and close the window when done — see F.7 for the two-window pattern.)
+(Windows / PowerShell: run the `ssh -L` line in its own window and close the window when done — see G.7 for the two-window pattern.)
 
 ### Incident: SSH locked out (your IP changed)
 
-Hetzner Cloud Firewall has a "Servers with this firewall" view — temporarily widen the rule from your **new** home IP, fix, narrow again. If you completed D.9, only the `dutyhive-mgmt-edge` firewall (or whichever rule applies to `mgmt-01`) needs to be widened — `app-01` and `db-01` already refuse public SSH.
+`edge-mgmt` is the only firewall with an `<YOUR_IP>/32` SSH rule. Hetzner Console → **Firewalls → edge-mgmt → Edit**, widen the SSH rule from your **new** home IP, fix, narrow again. `app-01` and `db-01` already refuse public SSH — they're unaffected.
 
 ### Incident: db-01 unreachable
 
 ```bash
 local$ ssh mgmt
-mgmt$  ping -c 2 10.0.1.3                 # private network up?
+mgmt$  ping -c 2 10.0.0.4                 # private network up?
 local$ ssh db                             # SSH via mgmt jump
 db$    sudo systemctl status postgresql@17-main
 db$    sudo journalctl -u postgresql@17-main -n 100
@@ -1428,6 +1548,17 @@ Common cause: Cloudflare proxy turned ON without ALPN-compatible cert mode. Set 
 ### Incident: backup file growing huge
 
 `pg_dump` includes every row including `audit_entry`, which grows linearly with traffic. After 6 months consider switching to incremental WAL archiving (`pg_basebackup` + `archive_command`). Documented as a follow-up in `docs/quality/risk-register.md` R-0006.
+
+### Routine: add a new server to the fleet
+
+The roadmap table in the Overview reserves IPs and firewall assignments for `jobs-01`, `app-02+`, `lb-01`. To add one:
+
+1. Provision the VPS in Hetzner Console with the matching firewall (`edge-app` for app-02, `edge-internal` for jobs-01).
+2. Confirm its private IP matches the reserved slot in the roadmap (or update the roadmap if Hetzner gave a different one).
+3. Run Phase D (D.1–D.8) on the new box via Hetzner web console.
+4. Add an entry to your local `~/.ssh/config` matching the alias pattern in E.1.
+5. If it needs to talk to db-01, add a `hostssl all all <NEW_BOX_PRIVATE_IP>/32 scram-sha-256` line to `pg_hba.conf` (G.3) and reload Postgres.
+6. If Coolify deploys to it, add it as a Server in Coolify (H.4 pattern).
 
 ---
 
