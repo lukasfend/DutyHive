@@ -20,7 +20,7 @@ This guide is the canonical reference for **Phase 6 (Provisioning & First Deploy
                 ▼                    ▼                    ▼
         ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
         │   mgmt-01    │    │   app-01     │    │    db-01     │
-        │   CX22       │    │   CPX21      │    │   CPX21      │
+        │   CX23       │    │   CPX22      │    │   CPX22      │
         │   Coolify    │    │   Next.js    │    │  Postgres 17 │
         │   Beszel hub │    │   (deployed) │    │  no public   │
         │   bastion    │    │              │    │  ingress     │
@@ -44,14 +44,14 @@ Public web traffic (HTTP/HTTPS) hits `app-01:443` directly — Cloudflare DNS re
 
 The Foundation runs on three VPS. Future boxes attach to the same private network so adding a fourth or fifth server never requires re-IPing the existing fleet.
 
-| Box     | Phase       | Role                                                | Spec         | Private IP | Public ingress (Cloud Firewall)     |
-| ------- | ----------- | --------------------------------------------------- | ------------ | ---------- | ----------------------------------- |
-| mgmt-01 | Foundation  | Coolify + Beszel hub + SSH bastion                  | CX22         | 10.0.1.1   | SSH from `<YOUR_IP>/32`             |
-| app-01  | Foundation  | Next.js production                                  | CPX21        | 10.0.1.2   | HTTP / HTTPS public                 |
-| db-01   | Foundation  | Postgres 17                                         | CPX21        | 10.0.1.3   | none (private only)                 |
-| jobs-01 | post-launch | Self-hosted Trigger.dev / cron / worker services    | CPX21        | 10.0.1.4   | HTTPS public (dashboard + webhooks) |
-| app-02+ | scale-out   | Additional Next.js instances behind a load balancer | CPX21        | 10.0.1.5+  | HTTP / HTTPS public                 |
-| lb-01   | scale-out   | Load balancer (Hetzner-managed LB or HAProxy VPS)   | LB11 / CPX11 | 10.0.1.10  | HTTP / HTTPS public                 |
+| Box     | Phase       | Role                                                | Spec        | Private IP | Public ingress (Cloud Firewall)     |
+| ------- | ----------- | --------------------------------------------------- | ----------- | ---------- | ----------------------------------- |
+| mgmt-01 | Foundation  | Coolify + Beszel hub + SSH bastion                  | CX23        | 10.0.1.1   | SSH from `<YOUR_IP>/32`             |
+| app-01  | Foundation  | Next.js production                                  | CPX22       | 10.0.1.2   | HTTP / HTTPS public                 |
+| db-01   | Foundation  | Postgres 17                                         | CPX22       | 10.0.1.3   | none (private only)                 |
+| jobs-01 | post-launch | Self-hosted Trigger.dev / cron / worker services    | CPX22       | 10.0.1.4   | HTTPS public (dashboard + webhooks) |
+| app-02+ | scale-out   | Additional Next.js instances behind a load balancer | CPX22       | 10.0.1.5+  | HTTP / HTTPS public                 |
+| lb-01   | scale-out   | Load balancer (Hetzner-managed LB or HAProxy VPS)   | LB11 / CX23 | 10.0.1.10  | HTTP / HTTPS public                 |
 
 Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't bake the brand into the infrastructure layer. Network and firewall names DO carry the brand prefix where convenient; renaming them is a cosmetic Hetzner Console change with no operational impact.
 
@@ -59,9 +59,9 @@ Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't ba
 
 | Item                      | Provider    | Type       | ~Cost / month |
 | ------------------------- | ----------- | ---------- | ------------- |
-| `mgmt-01` CX22            | Hetzner     | VPS        | €3.79         |
-| `app-01` CPX21            | Hetzner     | VPS        | €7.55         |
-| `db-01` CPX21             | Hetzner     | VPS        | €7.55         |
+| `mgmt-01` CX23            | Hetzner     | VPS        | €4.79         |
+| `app-01` CPX22            | Hetzner     | VPS        | €9.59         |
+| `db-01` CPX22             | Hetzner     | VPS        | €9.59         |
 | Storage Box BX11 (1 TB)   | Hetzner     | Backup     | €3.95         |
 | Object Storage            | Hetzner     | S3 (pay)   | ~€1–2         |
 | Cloud Firewalls + Network | Hetzner     | included   | €0            |
@@ -70,7 +70,9 @@ Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't ba
 | Resend Free               | Resend      | Mail send  | €0            |
 | Sentry Team Free          | Sentry      | Errors     | €0            |
 | Trigger.dev Free          | Trigger.dev | Jobs       | €0            |
-| **Sum**                   |             |            | **~€24–25**   |
+| **Sum**                   |             |            | **~€29–31**   |
+
+> Hetzner reshuffled their VPS lineup — the old CX22 / CPX21 were retired and replaced by **CX23** (2 vCPU Intel/AMD, 4 GB, 40 GB, €4.79/mo, **Cost-Optimized tier with "Limited availability"** badge — older hardware, can be sold out) and **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo, Regular Performance tier). If `CX23` is unavailable when you provision, fall back to **CAX11** (Arm64 Ampere, 2 vCPU, 4 GB, 40 GB, €5.39/mo) — same shape, ARM instead of x86. Coolify, Beszel, and the Docker images we use all run on ARM64 fine. For db-01, if you have headroom in the budget, **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) gives Postgres meaningful breathing room over CPX22.
 
 Domain registration (`dutyhive.com`) is already paid through Vercel Registrar — no monthly Hetzner cost for it.
 
@@ -305,8 +307,14 @@ Order: `mgmt-01` first, then `app-01`, then `db-01`. Hetzner assigns private IPs
 
 1. Hetzner Console → **Servers → Add Server**.
 2. **Location**: `Falkenstein` (FSN1).
-3. **Image**: `Ubuntu 24.04`.
-4. **Type**: shared vCPU **AMD** → **CX22** (2 vCPU, 4 GB RAM, 40 GB disk).
+3. **Image**: two options for `mgmt-01` —
+
+   - **Apps → Coolify** (recommended): Hetzner ships a pre-baked image with Ubuntu 24.04 + Docker + Coolify already installed and running. Saves Phases H.1 and H.2 — you skip straight to H.3 (first-run UI).
+   - Or **Standard → Ubuntu 24.04** if you want to install Coolify yourself (everything in Phase H still applies).
+
+   For `app-01` and `db-01` (C.2, C.3): always use the standard `Ubuntu 24.04` image. The Coolify App image is only for `mgmt-01`.
+
+4. **Type**: **Shared Resources → Cost-Optimized → x86 (Intel/AMD)** → **CX23** (2 vCPU, 4 GB RAM, 40 GB disk, €4.79/mo). If the "Limited availability" badge says it's sold out, switch the architecture toggle to **Arm64 (Ampere®)** and pick **CAX11** (2 vCPU, 4 GB, 40 GB, €5.39/mo) — same shape, ARM instead of x86.
 5. **Networking**:
    - Public IPv4: ✓
    - Public IPv6: ✓
@@ -327,7 +335,8 @@ Note the assigned **public IPv4** in the server details page — `<MGMT_PUBLIC_I
 
 Same as C.1 with these differences:
 
-- **Type**: shared vCPU **AMD** → **CPX21** (3 vCPU, 4 GB RAM, 80 GB disk).
+- **Image**: Standard → `Ubuntu 24.04` (NOT the Coolify App image — that's mgmt-only).
+- **Type**: **Shared Resources → Regular Performance** → **CPX22** (2 vCPU AMD, 4 GB RAM, 80 GB disk, €9.59/mo). If you're already expecting heavier traffic, **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) is the next step up.
 - **Firewalls**: select **`edge-app`** (NOT `edge-mgmt`).
 - **Backups**: enabled.
 - **Labels**: `role=app`, `env=prod`.
@@ -339,7 +348,8 @@ Note its public IPv4 as `<APP_PUBLIC_IP>` and confirm private IP is `10.0.1.2`.
 
 Same as C.1 with these differences:
 
-- **Type**: CPX21.
+- **Image**: Standard → `Ubuntu 24.04`.
+- **Type**: **Shared Resources → Regular Performance** → **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo) for Foundation budget. Postgres is RAM-hungry — if you can spend the extra €7, choose **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) instead. For sustained load production, **CCX13** (Dedicated, 2 vCPU AMD, 8 GB, 80 GB, €19.19/mo) gives you a non-shared CPU.
 - **Firewalls**: select **`edge-internal`** (NOT `edge-mgmt`).
 - **Backups**: enabled (this is the box you most want backed up).
 - **Labels**: `role=db`, `env=prod`.
@@ -489,6 +499,14 @@ app$  sudo ufw allow 443/tcp
 ```
 
 For **`db-01`**: same as the mgmt-01 base (no public 80/443 needed). The `allow from 10.0.0.0/16` line is what lets `app-01` reach Postgres on `5432` and lets you SSH via mgmt-jump.
+
+> **If `mgmt-01` was provisioned with the Coolify App image (C.1):** Coolify is already serving its UI on port 8000. Until Phase I.5 issues TLS for `coolify.dutyhive.com` and Coolify routes itself through Caddy on `:443`, you need port 8000 reachable from your laptop:
+>
+> ```bash
+> mgmt$ sudo ufw allow from <YOUR_IP>/32 to any port 8000 proto tcp comment 'Coolify UI bootstrap'
+> ```
+>
+> Drop this rule with `sudo ufw delete allow from <YOUR_IP>/32 to any port 8000 proto tcp` after Phase I.5 once `https://coolify.dutyhive.com` works.
 
 ### D.6 fail2ban
 
@@ -893,7 +911,15 @@ Coolify itself never touches db-01. The migration tunnel from G.7 is what bridge
 
 The only externally reachable SSH port in the whole stack is `mgmt-01:22`, restricted to your home IP via `edge-mgmt`. Everything else flows over the private network.
 
-### H.1 Install Docker (Coolify's prereq)
+### Did you use the Coolify App image at C.1?
+
+If you picked **Apps → Coolify** as the image when ordering `mgmt-01` (recommended in C.1), Hetzner has already done H.1 (Docker) and H.2 (Coolify install) for you. **Skip directly to H.3** — the Coolify UI is already serving on `http://<MGMT_PUBLIC_IP>:8000`.
+
+> **First-access timing matters.** Coolify's first-run flow has no auth gate — whoever opens `<MGMT_PUBLIC_IP>:8000` first claims the admin account. With the Hetzner App image, Coolify is up the moment the box finishes booting (a few minutes after `Create & Buy`). Open the UI **before** you start Phase D.5 (UFW), or punch a temporary `allow 8000/tcp from <YOUR_IP>/32` rule in UFW so the UI stays reachable while you finish hardening. Once Phase I.5 issues TLS for `coolify.dutyhive.com`, Coolify routes itself through Caddy on `:443` and you can drop the port-8000 rule entirely.
+
+If you used the standard `Ubuntu 24.04` image instead, run H.1 and H.2 below to install Docker and Coolify yourself.
+
+### H.1 Install Docker (Coolify's prereq) — **skip if Coolify App image was selected**
 
 ```bash
 local$ ssh mgmt
@@ -912,7 +938,7 @@ local$ ssh mgmt                        # re-login so the docker group takes effe
 mgmt$  docker version                  # should print client + server versions
 ```
 
-### H.2 Install Coolify
+### H.2 Install Coolify — **skip if Coolify App image was selected**
 
 ```bash
 mgmt$  sudo curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /tmp/coolify-install.sh
