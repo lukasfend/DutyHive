@@ -20,7 +20,7 @@ This guide is the canonical reference for **Phase 6 (Provisioning & First Deploy
                 ▼                    ▼                    ▼
         ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
         │   mgmt-01    │    │   app-01     │    │    db-01     │
-        │   CX23       │    │   CPX22      │    │   CPX22      │
+        │   CX23       │    │   CPX22      │    │   CX23       │
         │   Coolify    │    │   Next.js    │    │  Postgres 17 │
         │   Beszel hub │    │   (deployed) │    │  no public   │
         │   bastion    │    │              │    │  ingress     │
@@ -44,33 +44,35 @@ Public web traffic (HTTP/HTTPS) hits `app-01:443` directly — Cloudflare DNS re
 
 The Foundation runs on three VPS. Future boxes attach to the same private network so adding a fourth or fifth server never requires re-IPing the existing fleet.
 
-| Box     | Phase       | Role                                                | Spec        | Private IP | Public ingress (Cloud Firewall)     |
-| ------- | ----------- | --------------------------------------------------- | ----------- | ---------- | ----------------------------------- |
-| mgmt-01 | Foundation  | Coolify + Beszel hub + SSH bastion                  | CX23        | 10.0.1.1   | SSH from `<YOUR_IP>/32`             |
-| app-01  | Foundation  | Next.js production                                  | CPX22       | 10.0.1.2   | HTTP / HTTPS public                 |
-| db-01   | Foundation  | Postgres 17                                         | CPX22       | 10.0.1.3   | none (private only)                 |
-| jobs-01 | post-launch | Self-hosted Trigger.dev / cron / worker services    | CPX22       | 10.0.1.4   | HTTPS public (dashboard + webhooks) |
-| app-02+ | scale-out   | Additional Next.js instances behind a load balancer | CPX22       | 10.0.1.5+  | HTTP / HTTPS public                 |
-| lb-01   | scale-out   | Load balancer (Hetzner-managed LB or HAProxy VPS)   | LB11 / CX23 | 10.0.1.10  | HTTP / HTTPS public                 |
+| Box     | Phase       | Role                                                | Spec        | Public IPv4   | Private IP | Public ingress (Cloud Firewall)     |
+| ------- | ----------- | --------------------------------------------------- | ----------- | ------------- | ---------- | ----------------------------------- |
+| mgmt-01 | Foundation  | Coolify + Beszel hub + SSH bastion                  | CX23        | ✓ (bastion)   | 10.0.1.1   | SSH from `<YOUR_IP>/32`             |
+| app-01  | Foundation  | Next.js production                                  | CPX22       | ✓ (web)       | 10.0.1.2   | HTTP / HTTPS public                 |
+| db-01   | Foundation  | Postgres 17                                         | CX23        | ✗ (IPv6 only) | 10.0.1.3   | none (private only)                 |
+| jobs-01 | post-launch | Self-hosted Trigger.dev / cron / worker services    | CPX22       | ✓ (webhooks)  | 10.0.1.4   | HTTPS public (dashboard + webhooks) |
+| app-02+ | scale-out   | Additional Next.js instances behind a load balancer | CPX22       | ✓ (web)       | 10.0.1.5+  | HTTP / HTTPS public                 |
+| lb-01   | scale-out   | Load balancer (Hetzner-managed LB or HAProxy VPS)   | LB11 / CX23 | ✓ (LB)        | 10.0.1.10  | HTTP / HTTPS public                 |
 
 Box names are intentionally generic (`mgmt-01`, `app-01`, …) — they don't bake the brand into the infrastructure layer. Network and firewall names DO carry the brand prefix where convenient; renaming them is a cosmetic Hetzner Console change with no operational impact.
 
 ### What you'll buy (Foundation only, monthly)
 
-| Item                      | Provider    | Type       | ~Cost / month |
-| ------------------------- | ----------- | ---------- | ------------- |
-| `mgmt-01` CX23            | Hetzner     | VPS        | €4.79         |
-| `app-01` CPX22            | Hetzner     | VPS        | €9.59         |
-| `db-01` CPX22             | Hetzner     | VPS        | €9.59         |
-| Storage Box BX11 (1 TB)   | Hetzner     | Backup     | €3.95         |
-| Object Storage            | Hetzner     | S3 (pay)   | ~€1–2         |
-| Cloud Firewalls + Network | Hetzner     | included   | €0            |
-| Cloudflare DNS + WAF Free | Cloudflare  | DNS        | €0            |
-| Cloudflare Email Routing  | Cloudflare  | Mail relay | €0            |
-| Resend Free               | Resend      | Mail send  | €0            |
-| Sentry Team Free          | Sentry      | Errors     | €0            |
-| Trigger.dev Free          | Trigger.dev | Jobs       | €0            |
-| **Sum**                   |             |            | **~€29–31**   |
+| Item                              | Provider    | Type       | ~Cost / month |
+| --------------------------------- | ----------- | ---------- | ------------- |
+| `mgmt-01` CX23 + Public IPv4      | Hetzner     | VPS        | €4.79         |
+| `app-01` CPX22 + Public IPv4      | Hetzner     | VPS        | €9.59         |
+| `db-01` CX23 (IPv6-only, no IPv4) | Hetzner     | VPS        | €4.29         |
+| Storage Box BX11 (1 TB)           | Hetzner     | Backup     | €3.95         |
+| Object Storage                    | Hetzner     | S3 (pay)   | ~€1–2         |
+| Cloud Firewalls + Network         | Hetzner     | included   | €0            |
+| Cloudflare DNS + WAF Free         | Cloudflare  | DNS        | €0            |
+| Cloudflare Email Routing          | Cloudflare  | Mail relay | €0            |
+| Resend Free                       | Resend      | Mail send  | €0            |
+| Sentry Team Free                  | Sentry      | Errors     | €0            |
+| Trigger.dev Free                  | Trigger.dev | Jobs       | €0            |
+| **Sum**                           |             |            | **~€24–26**   |
+
+> The `db-01` price drops below the catalog €4.79 because we **disable Public IPv4** on it (Hetzner deducts the €0.50/mo Primary-IP fee). The box keeps Public IPv6 and the private network — that's enough for `apt`, Hetzner Storage Box backups, and Beszel-agent downloads. See Phase C.3 for the trade-off.
 
 > **Fallbacks if the recommended SKUs are sold out or under-spec'd:**
 >
@@ -108,18 +110,21 @@ If you've never done this before: **6–10 hours** spread over 1–2 days. Most 
 
 On Windows we recommend doing this work from one of these terminals:
 
-- **PowerShell 7** (`pwsh`) — the conventions table below shows PowerShell variants on `local-ps>` lines whenever syntax differs from POSIX shells.
-- **Git Bash** that ships with Git for Windows — accepts every `local$` line verbatim.
+- **PowerShell 7** (`pwsh`) — code blocks fenced ` ```powershell ` are the PowerShell variants and only appear when POSIX syntax doesn't work as-is.
+- **Git Bash** that ships with Git for Windows — accepts every ` ```bash ` block verbatim.
 - **WSL2 (Ubuntu)** — the most painless option; treat it as Linux throughout.
 
 If you pick PowerShell, run `Start-Service ssh-agent` once before the first `ssh-add` and re-run it on each new shell session (or set the service to `Automatic`).
 
 ### Conventions used in this guide
 
-- Commands prefixed with `local$` run on **your laptop** in a POSIX shell (Linux, macOS, WSL, Git Bash).
-- Commands prefixed with `local-ps>` are the **Windows PowerShell** equivalent and only appear when the POSIX line doesn't work as-is.
-- Commands prefixed with `mgmt$`, `app$`, `db$` run on **that specific VPS** as a non-root user.
-- Commands prefixed with `mgmt#`, `app#`, `db#` run on that VPS as **root** (via `sudo -i` after the initial root login, or via Hetzner web console for boxes that have no public SSH yet).
+- **Code blocks have no shell-prompt prefix** so you can hit GitHub's "copy" button and paste straight into a terminal without manual cleanup. The block's host is named in the prose right above it ("On `mgmt-01` as root:", "On your laptop:", "Now on `db-01`:", etc.).
+- The fenced language tag tells you the shell:
+  - ` ```bash ` → POSIX shell (Linux, macOS, WSL, Git Bash, or your VPS).
+  - ` ```powershell ` → Windows PowerShell. Only appears when the POSIX equivalent doesn't translate cleanly.
+  - ` ```sh-config `, ` ```env `, ` ```sql `, ` ```conf ` → config snippets (paste into the file path the prose names, not into a shell).
+- A line that starts with `ssh mgmt`, `ssh app`, `ssh db` (etc.) inside a block is the **host transition marker** — every command after it runs on that remote host until you `exit`.
+- Lines starting with `sudo` are run as a non-root user with sudo. Lines that need root directly (because there's no sudo user yet, e.g. before D.2) are introduced in prose with "as root via the Hetzner web console" or similar.
 - Replace `<…>` placeholders with real values before pasting.
 
 ---
@@ -137,11 +142,11 @@ If you pick PowerShell, run `Start-Service ssh-agent` once before the first `ssh
 Pick a passphrase **different from your laptop login password** and store it in your password manager.
 
 ```bash
-local$ ssh-keygen -t ed25519 -C "infra-admin@<your-email>" -f ~/.ssh/infra_admin_ed25519
+ssh-keygen -t ed25519 -C "infra-admin@<your-email>" -f ~/.ssh/infra_admin_ed25519
 ```
 
 ```powershell
-local-ps> ssh-keygen -t ed25519 -C "infra-admin@<your-email>" -f $HOME\.ssh\infra_admin_ed25519
+ssh-keygen -t ed25519 -C "infra-admin@<your-email>" -f $HOME\.ssh\infra_admin_ed25519
 ```
 
 This produces:
@@ -152,13 +157,13 @@ This produces:
 Add the key to your local agent so subsequent `ssh` calls use it without re-typing the passphrase:
 
 ```bash
-local$ ssh-add ~/.ssh/infra_admin_ed25519
+ssh-add ~/.ssh/infra_admin_ed25519
 ```
 
 ```powershell
-local-ps> Get-Service ssh-agent | Set-Service -StartupType Automatic
-local-ps> Start-Service ssh-agent
-local-ps> ssh-add $HOME\.ssh\infra_admin_ed25519
+Get-Service ssh-agent | Set-Service -StartupType Automatic
+Start-Service ssh-agent
+ssh-add $HOME\.ssh\infra_admin_ed25519
 ```
 
 ### A.3 Upload the public key to Hetzner
@@ -176,16 +181,16 @@ The CLI lets you script provisioning. Not required for this guide, but useful fo
 
 ```bash
 # macOS
-local$ brew install hcloud
+brew install hcloud
 
 # Linux (download binary from https://github.com/hetznercloud/cli/releases)
-local$ curl -L https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar xz
-local$ sudo mv hcloud /usr/local/bin/
+curl -L https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar xz
+sudo mv hcloud /usr/local/bin/
 ```
 
 ```powershell
 # Windows
-local-ps> winget install Hetzner.hcloud
+winget install Hetzner.hcloud
 # Or manually: download hcloud-windows-amd64.zip from the Releases page,
 # extract, and place hcloud.exe somewhere on $env:Path.
 ```
@@ -193,7 +198,7 @@ local-ps> winget install Hetzner.hcloud
 Generate an API token in **Security → API Tokens → Generate API Token** (read+write), then:
 
 ```bash
-local$ hcloud context create prod
+hcloud context create prod
 # Paste the token when prompted.
 ```
 
@@ -208,11 +213,11 @@ This phase creates the Private Network and **three** Cloud Firewalls before we o
 We'll lock the bastion's public SSH ingress to your IP only.
 
 ```bash
-local$ curl -s https://api.ipify.org
+curl -s https://api.ipify.org
 ```
 
 ```powershell
-local-ps> Invoke-RestMethod https://api.ipify.org
+Invoke-RestMethod https://api.ipify.org
 ```
 
 Note the IPv4 address (`<YOUR_IP>` from now on). If your ISP gives you a dynamic IP, you'll have to update the firewall rule when it changes — keep the IP detection command handy.
@@ -368,7 +373,15 @@ Note its public IPv4 as `<APP_PUBLIC_IP>` and confirm private IP is `10.0.1.2`. 
 Same as C.1 with these differences:
 
 - **Image**: Standard → `Ubuntu 24.04`.
-- **Type**: **Shared Resources → Regular Performance** → **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo) for Foundation budget. Postgres is RAM-hungry — if you can spend the extra €7, choose **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo) instead. For sustained load production, **CCX13** (Dedicated, 2 vCPU AMD, 8 GB, 80 GB, €19.19/mo) gives you a non-shared CPU.
+- **Type**: **Shared Resources → Cost-Optimized → x86 (Intel/AMD)** → **CX23** (2 vCPU, 4 GB RAM, 40 GB disk, €4.79/mo) for the Foundation budget. Same 2 vCPU / 4 GB shape as CPX22, half the disk (40 vs. 80 GB) and €4.80/mo cheaper. Plan to attach a Hetzner Volume (Phase G addendum) once disk hits ~70% — Postgres + `audit_entry` growth fills 40 GB faster than 80 GB. **Upgrade paths** if you want headroom from day 1: **CPX22** (2 vCPU AMD, 4 GB, 80 GB, €9.59/mo), **CPX32** (4 vCPU, 8 GB, 160 GB, €16.79/mo), or **CCX13** (Dedicated General Purpose, 2 vCPU AMD, 8 GB, 80 GB, €19.19/mo).
+- **Networking — disable Public IPv4** (saves €0.50/mo and removes the only public footprint db-01 would have):
+
+  - Public IPv4: **✗ unchecked**
+  - Public IPv6: ✓ (free, used for `apt`, Storage Box backups, Beszel-agent downloads)
+  - Private network: select `internal`. Hetzner auto-assigns `10.0.1.3`.
+
+  All inbound (Postgres queries from app-01, SSH via mgmt-jump) comes via the private network. All outbound goes via IPv6 — Hetzner Storage Box, `apt.postgresql.org`, and GitHub all serve over IPv6, so the Foundation pipeline works as documented. If you ever need to reach an IPv4-only service from db-01, attach a Public IPv4 from **Server details → Networking** with one click — no rebuild required.
+
 - **Firewalls**: leave empty — `edge-internal` auto-attaches via labels.
 - **Backups**: enabled (this is the box you most want backed up).
 - **Labels**:
@@ -377,14 +390,14 @@ Same as C.1 with these differences:
   - `env=prod`
 - **Name**: `db-01`.
 
-Note `<DB_PUBLIC_IP>` (you'll rarely use it — db-01 has no public ingress) and confirm private IP is `10.0.1.3`. Verify `edge-internal` is attached in **Server details → Firewalls**.
+There is no `<DB_PUBLIC_IP>` to note — the box has no public IPv4. Confirm private IP is `10.0.1.3` and `edge-internal` is attached in **Server details → Firewalls**. The Public IPv6 address shows up in **Server details → Networking → Public**; you'll rarely reference it directly because all admin work goes via `ssh db` (which jumps through mgmt over the private network).
 
 ### C.4 First-login sanity check
 
 Only `mgmt-01` is publicly SSH-able. Try it:
 
 ```bash
-local$ ssh root@<MGMT_PUBLIC_IP> 'echo OK; hostname'
+ssh root@<MGMT_PUBLIC_IP> 'echo OK; hostname'
 ```
 
 If this prompts for a password, the SSH key wasn't injected — fix in **Server Details → SSH keys**, attach `infra-admin`, then `ssh-keygen -R <MGMT_PUBLIC_IP>` locally to clear the old fingerprint, then retry.
@@ -394,12 +407,15 @@ If this prompts for a password, the SSH key wasn't injected — fix in **Server 
 While in the web console on each box, take note of:
 
 ```bash
-ip -4 addr show          # confirm both eth0 (public) and enp7s0 (private) show IPs
+ip -4 addr show          # app-01: eth0 (public IPv4) + enp7s0 (private). db-01: only enp7s0 (no Public IPv4 by design)
+ip -6 addr show          # confirm both have a global IPv6 on eth0
 hostname                  # should match what you named the box
 cat /root/.ssh/authorized_keys     # confirm your key is here
 ```
 
-If the private interface is missing, the network attachment didn't go through — re-check the server's **Network** tab in the Hetzner Console and reattach.
+For `db-01` specifically: there is no public IPv4 line (you disabled it in C.3). Outbound internet traffic uses Public IPv6 — confirm with `ping -c 2 -6 deb.debian.org` (should resolve and respond). If that fails, the IPv6 routing isn't up — re-check **Server details → Networking** in Hetzner Console.
+
+If the private interface is missing on any box, the network attachment didn't go through — re-check the server's **Network** tab in the Hetzner Console and reattach.
 
 If `/root/.ssh/authorized_keys` is empty, Hetzner didn't inject the key. Paste the contents of your local `~/.ssh/infra_admin_ed25519.pub` into it now (`mkdir -p /root/.ssh && chmod 700 /root/.ssh && cat >> /root/.ssh/authorized_keys` then paste, then `chmod 600 /root/.ssh/authorized_keys`).
 
@@ -408,9 +424,9 @@ If `/root/.ssh/authorized_keys` is empty, Hetzner didn't inject the key. Paste t
 From mgmt-01:
 
 ```bash
-local$ ssh root@<MGMT_PUBLIC_IP>
-mgmt#  ping -c 2 10.0.1.2      # should reach app-01
-mgmt#  ping -c 2 10.0.1.3      # should reach db-01
+ssh root@<MGMT_PUBLIC_IP>
+ping -c 2 10.0.1.2      # should reach app-01
+ping -c 2 10.0.1.3      # should reach db-01
 ```
 
 Ping should succeed. This only verifies ICMP — TCP services aren't running yet, that's Phase D's job. If ping fails, the private network attachment is broken — retry the Network step in Hetzner Console.
@@ -426,8 +442,8 @@ For `app-01` and `db-01`, you start each session via the web console — once th
 ### D.1 System update + base tools
 
 ```bash
-mgmt#  apt update && apt upgrade -y
-mgmt#  apt install -y \
+apt update && apt upgrade -y
+apt install -y \
          curl wget git vim ufw fail2ban unattended-upgrades \
          ca-certificates gnupg lsb-release rsync htop tmux jq tcpdump
 ```
@@ -435,19 +451,19 @@ mgmt#  apt install -y \
 ### D.2 Create a non-root user
 
 ```bash
-mgmt#  adduser --gecos '' deploy        # set a strong passphrase from your password manager
-mgmt#  usermod -aG sudo deploy
-mgmt#  mkdir -p /home/deploy/.ssh
-mgmt#  cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
-mgmt#  chown -R deploy:deploy /home/deploy/.ssh
-mgmt#  chmod 700 /home/deploy/.ssh
-mgmt#  chmod 600 /home/deploy/.ssh/authorized_keys
+adduser --gecos '' deploy        # set a strong passphrase from your password manager
+usermod -aG sudo deploy
+mkdir -p /home/deploy/.ssh
+cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
 Sanity-check from your laptop **before** disabling root login (mgmt only — for app/db you do this from inside the web console):
 
 ```bash
-local$ ssh deploy@<MGMT_PUBLIC_IP> 'whoami && sudo -n true && echo OK'
+ssh deploy@<MGMT_PUBLIC_IP> 'whoami && sudo -n true && echo OK'
 # expected: deploy ... OK   (sudo prompts for the deploy password — that's fine)
 ```
 
@@ -456,7 +472,7 @@ If that works, continue.
 ### D.3 Lock down sshd (`/etc/ssh/sshd_config.d/99-hardening.conf`)
 
 ```bash
-mgmt#  cat > /etc/ssh/sshd_config.d/99-hardening.conf <<'EOF'
+cat > /etc/ssh/sshd_config.d/99-hardening.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
 ChallengeResponseAuthentication no
@@ -469,7 +485,7 @@ ClientAliveCountMax 2
 MaxAuthTries 3
 AllowUsers deploy
 EOF
-mgmt#  sshd -t        # syntax check — must print nothing
+sshd -t        # syntax check — must print nothing
 ```
 
 Don't reload sshd yet — that comes after D.4.
@@ -481,19 +497,19 @@ Ubuntu 24.04 ships SSH as a **socket-activated** unit (`ssh.socket`) instead of 
 The cleanest fix is to take socket activation out of the picture and run `sshd` as a normal long-lived service:
 
 ```bash
-mgmt#  systemctl disable --now ssh.socket
-mgmt#  systemctl mask ssh.socket
-mgmt#  systemctl enable --now ssh.service
-mgmt#  systemctl reload ssh.service           # picks up the 99-hardening.conf from D.3
-mgmt#  systemctl status ssh.service           # active (running)
-mgmt#  ss -tlnp | grep ':22'                   # owner column shows ONLY sshd, not systemd
+systemctl disable --now ssh.socket
+systemctl mask ssh.socket
+systemctl enable --now ssh.service
+systemctl reload ssh.service           # picks up the 99-hardening.conf from D.3
+systemctl status ssh.service           # active (running)
+ss -tlnp | grep ':22'                   # owner column shows ONLY sshd, not systemd
 ```
 
 If `ss -tlnp` previously showed `users:(("sshd",...),("systemd",...))` and now shows only `sshd`, the switch worked. Now test from your laptop in a **second** terminal — keep the root web-console / root SSH session open until you confirm `deploy` login works:
 
 ```bash
-local$ ssh deploy@<MGMT_PUBLIC_IP>     # should land you in /home/deploy
-local$ ssh root@<MGMT_PUBLIC_IP>       # should be REJECTED
+ssh deploy@<MGMT_PUBLIC_IP>     # should land you in /home/deploy
+ssh root@<MGMT_PUBLIC_IP>       # should be REJECTED
 ```
 
 Once verified, exit the root session.
@@ -505,19 +521,19 @@ Once verified, exit the root session.
 Defence in depth. The Hetzner firewall (Phase B) is the outer perimeter; UFW on the box is the inner one.
 
 ```bash
-mgmt$ sudo ufw default deny incoming
-mgmt$ sudo ufw default allow outgoing
-mgmt$ sudo ufw allow OpenSSH
-mgmt$ sudo ufw allow from 10.0.0.0/16    # all private-network traffic
-mgmt$ sudo ufw enable                    # type 'y' to confirm
-mgmt$ sudo ufw status verbose
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow OpenSSH
+sudo ufw allow from 10.0.0.0/16    # all private-network traffic
+sudo ufw enable                    # type 'y' to confirm
+sudo ufw status verbose
 ```
 
 For **`app-01`**: same as above, plus:
 
 ```bash
-app$  sudo ufw allow 80/tcp
-app$  sudo ufw allow 443/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 ```
 
 For **`db-01`**: same as the mgmt-01 base (no public 80/443 needed). The `allow from 10.0.0.0/16` line is what lets `app-01` reach Postgres on `5432` and lets you SSH via mgmt-jump.
@@ -535,8 +551,8 @@ For **`db-01`**: same as the mgmt-01 base (no public 80/443 needed). The `allow 
 The default `sshd` jail ships enabled by the package — verify:
 
 ```bash
-mgmt$ sudo systemctl enable --now fail2ban
-mgmt$ sudo fail2ban-client status sshd
+sudo systemctl enable --now fail2ban
+sudo fail2ban-client status sshd
 ```
 
 Public-internet bots will hammer your `mgmt-01:22` constantly. fail2ban bans IPs after 5 failed attempts (default 10 min). Once Phase D.4 is in place, brute-force attempts get `Permission denied (publickey)` immediately — they never reach PAM — and fail2ban bans them out of the way.
@@ -544,14 +560,14 @@ Public-internet bots will hammer your `mgmt-01:22` constantly. fail2ban bans IPs
 ### D.7 Unattended security upgrades
 
 ```bash
-mgmt$ sudo dpkg-reconfigure --priority=low unattended-upgrades   # answer Yes
-mgmt$ cat /etc/apt/apt.conf.d/50unattended-upgrades              # confirm only -security is enabled
+sudo dpkg-reconfigure --priority=low unattended-upgrades   # answer Yes
+cat /etc/apt/apt.conf.d/50unattended-upgrades              # confirm only -security is enabled
 ```
 
 ### D.8 Set timezone
 
 ```bash
-mgmt$ sudo timedatectl set-timezone Europe/Vienna
+sudo timedatectl set-timezone Europe/Vienna
 ```
 
 ### D.9 Repeat on the other boxes
@@ -609,39 +625,38 @@ OpenSSH on Windows expands `~` to `$env:USERPROFILE`, so the same `IdentityFile 
 Lock down the file permissions — sshd refuses to read a world-readable config:
 
 ```bash
-local$ chmod 600 ~/.ssh/config
+chmod 600 ~/.ssh/config
 ```
 
 ```powershell
-local-ps> icacls $HOME\.ssh\config /inheritance:r /grant:r "$($env:USERNAME):F"
+icacls $HOME\.ssh\config /inheritance:r /grant:r "$($env:USERNAME):F"
 ```
 
 ### E.2 Smoke test
 
 ```bash
-local$ ssh mgmt 'whoami && hostname'   # → deploy / mgmt-01
-local$ ssh app  'whoami && hostname'   # → deploy / app-01  (jumps via mgmt)
-local$ ssh db   'whoami && hostname'   # → deploy / db-01   (jumps via mgmt)
+ssh mgmt 'whoami && hostname'   # → deploy / mgmt-01
+ssh app  'whoami && hostname'   # → deploy / app-01  (jumps via mgmt)
+ssh db   'whoami && hostname'   # → deploy / db-01   (jumps via mgmt)
 ```
 
 ```powershell
-local-ps> ssh mgmt 'whoami; hostname'
-local-ps> ssh app  'whoami; hostname'
-local-ps> ssh db   'whoami; hostname'
+ssh mgmt 'whoami; hostname'
+ssh app  'whoami; hostname'
+ssh db   'whoami; hostname'
 ```
 
 ### E.3 Verify the bastion topology
 
-Confirm that direct public SSH to `app-01` and `db-01` is impossible:
+Confirm that direct public SSH to `app-01` is impossible (db-01 has no public IPv4 to point at — it's unreachable from the public IPv4 internet by construction):
 
 ```bash
-local$ ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>     # should time out (edge-app blocks)
-local$ ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>      # should time out (edge-internal blocks)
-local$ ssh app 'echo OK'                                  # should succeed via mgmt jump
-local$ ssh db  'echo OK'                                  # should succeed via mgmt jump
+ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>     # should time out (edge-app blocks)
+ssh app 'echo OK'                                  # should succeed via mgmt jump
+ssh db  'echo OK'                                  # should succeed via mgmt jump
 ```
 
-If both refusals and both successes hold: the bastion topology is enforced. mgmt-01 is the only door to the fleet.
+If the refusal and both successes hold: the bastion topology is enforced. mgmt-01 is the only door to the fleet.
 
 ### E.4 Troubleshooting — `ssh app` / `ssh db` refused or hangs
 
@@ -650,19 +665,19 @@ If something fails, the failure mode usually pinpoints the cause. Run these diag
 **On mgmt:**
 
 ```bash
-mgmt$ ping -c 2 10.0.1.2                                   # private network reachability
-mgmt$ nc -zv 10.0.1.2 22                                   # TCP/22 reachability
-mgmt$ ssh -v -o ConnectTimeout=5 deploy@10.0.1.2 2>&1 | head -20
+ping -c 2 10.0.1.2                                   # private network reachability
+nc -zv 10.0.1.2 22                                   # TCP/22 reachability
+ssh -v -o ConnectTimeout=5 deploy@10.0.1.2 2>&1 | head -20
 ```
 
 **On the target box** (via web console if you can't SSH yet):
 
 ```bash
-app#  ufw status
-app#  iptables -L INPUT -n -v --line-numbers
-app#  nft list ruleset 2>/dev/null
-app#  ss -tlnp | grep ':22'
-app#  systemctl status ssh.service
+ufw status
+iptables -L INPUT -n -v --line-numbers
+nft list ruleset 2>/dev/null
+ss -tlnp | grep ':22'
+systemctl status ssh.service
 ```
 
 Map of likely findings → fix:
@@ -697,11 +712,11 @@ Once provisioned (1–5 minutes), open it:
 Use a separate key from the admin key so a compromised app server can't trivially read backups offline.
 
 ```bash
-local$ ssh-keygen -t ed25519 -C "infra-backups@<host>" -f ~/.ssh/infra_backup_ed25519 -N ""
+ssh-keygen -t ed25519 -C "infra-backups@<host>" -f ~/.ssh/infra_backup_ed25519 -N ""
 ```
 
 ```powershell
-local-ps> ssh-keygen -t ed25519 -C "infra-backups@<host>" -f $HOME\.ssh\infra_backup_ed25519 -N '""'
+ssh-keygen -t ed25519 -C "infra-backups@<host>" -f $HOME\.ssh\infra_backup_ed25519 -N '""'
 ```
 
 (Empty passphrase: this key lives on `db-01` and runs unattended. The Storage Box itself enforces username scope.)
@@ -727,15 +742,15 @@ We install Postgres directly on `db-01`. No Docker on this box — keeping the d
 ### G.1 Install Postgres 17 from the PGDG repo
 
 ```bash
-local$ ssh db
-db$  sudo install -d /usr/share/postgresql-common/pgdg
-db$  sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+ssh db
+sudo install -d /usr/share/postgresql-common/pgdg
+sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
        https://www.postgresql.org/media/keys/ACCC4CF8.asc
-db$  sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
        https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list'
-db$  sudo apt update
-db$  sudo apt install -y postgresql-17 postgresql-contrib-17
+sudo apt update
+sudo apt install -y postgresql-17 postgresql-contrib-17
 ```
 
 ### G.2 Bind Postgres to the private network only
@@ -743,13 +758,13 @@ db$  sudo apt install -y postgresql-17 postgresql-contrib-17
 Get `db-01`'s private IP (should be `10.0.1.3`):
 
 ```bash
-db$  ip -4 addr show enp7s0
+ip -4 addr show enp7s0
 ```
 
 Edit `/etc/postgresql/17/main/postgresql.conf`:
 
 ```bash
-db$  sudo vim /etc/postgresql/17/main/postgresql.conf
+sudo vim /etc/postgresql/17/main/postgresql.conf
 ```
 
 Change:
@@ -769,7 +784,7 @@ The `edge-internal` firewall rules from Phase B already block public access to p
 Edit `/etc/postgresql/17/main/pg_hba.conf` and **replace** the default `host all all all md5` line with:
 
 ```bash
-db$  sudo vim /etc/postgresql/17/main/pg_hba.conf
+sudo vim /etc/postgresql/17/main/pg_hba.conf
 ```
 
 ```conf
@@ -788,9 +803,9 @@ When `app-02` joins later, add `hostssl all all 10.0.1.5/32 scram-sha-256` (or t
 Reload Postgres:
 
 ```bash
-db$  sudo systemctl restart postgresql@17-main
-db$  sudo -u postgres psql -c "SHOW listen_addresses;"
-db$  sudo ss -tlnp | grep 5432       # confirm only 10.0.1.3:5432 is listening
+sudo systemctl restart postgresql@17-main
+sudo -u postgres psql -c "SHOW listen_addresses;"
+sudo ss -tlnp | grep 5432       # confirm only 10.0.1.3:5432 is listening
 ```
 
 ### G.4 Create roles + database + extensions
@@ -801,7 +816,7 @@ Generate two strong random passwords now (in your password manager):
 - `<MIGRATE_DB_PASSWORD>` — for `migrate_user` (used only by `prisma migrate deploy`)
 
 ```bash
-db$  sudo -u postgres psql <<EOF
+sudo -u postgres psql <<EOF
 CREATE ROLE app_user
   WITH LOGIN PASSWORD '<APP_DB_PASSWORD>' NOBYPASSRLS;
 
@@ -816,7 +831,7 @@ CREATE DATABASE app_prod OWNER migrate_user;
 GRANT CONNECT ON DATABASE app_prod TO app_user;
 EOF
 
-db$  sudo -u postgres psql -d app_prod <<'EOF'
+sudo -u postgres psql -d app_prod <<'EOF'
 GRANT USAGE ON SCHEMA public TO app_user, migrate_user;
 GRANT CREATE ON SCHEMA public TO migrate_user;
 
@@ -837,30 +852,30 @@ EOF
 For Foundation we use a self-signed cert; the cert chain is shared with `app-01` out of band. For a public-CA cert, follow the same steps but plug in `certbot certonly --standalone` on the box temporarily.
 
 ```bash
-db$  sudo openssl req -new -x509 -days 825 -nodes \
+sudo openssl req -new -x509 -days 825 -nodes \
         -out /etc/postgresql/17/main/server.crt \
         -keyout /etc/postgresql/17/main/server.key \
         -subj "/CN=db-01.internal"
-db$  sudo chown postgres:postgres /etc/postgresql/17/main/server.{crt,key}
-db$  sudo chmod 600 /etc/postgresql/17/main/server.key
-db$  sudo chmod 644 /etc/postgresql/17/main/server.crt
+sudo chown postgres:postgres /etc/postgresql/17/main/server.{crt,key}
+sudo chmod 600 /etc/postgresql/17/main/server.key
+sudo chmod 644 /etc/postgresql/17/main/server.crt
 
 # Point Postgres at it:
-db$  sudo sed -i \
+sudo sed -i \
         -e "s|^ssl_cert_file = .*|ssl_cert_file = '/etc/postgresql/17/main/server.crt'|" \
         -e "s|^ssl_key_file = .*|ssl_key_file = '/etc/postgresql/17/main/server.key'|" \
         /etc/postgresql/17/main/postgresql.conf
-db$  sudo systemctl restart postgresql@17-main
+sudo systemctl restart postgresql@17-main
 ```
 
 Copy the cert to `app-01` so the Node `pg` driver trusts it. From your laptop:
 
 ```bash
-local$ ssh db 'sudo cat /etc/postgresql/17/main/server.crt' > /tmp/db-ca.crt
-local$ scp /tmp/db-ca.crt app:/tmp/
-local$ ssh app
-app$   sudo install -d /etc/app
-app$   sudo install -m 644 /tmp/db-ca.crt /etc/app/db-ca.crt
+ssh db 'sudo cat /etc/postgresql/17/main/server.crt' > /tmp/db-ca.crt
+scp /tmp/db-ca.crt app:/tmp/
+ssh app
+sudo install -d /etc/app
+sudo install -m 644 /tmp/db-ca.crt /etc/app/db-ca.crt
 ```
 
 The connection string used by the app will set `?sslmode=verify-full&sslrootcert=/etc/app/db-ca.crt`.
@@ -868,9 +883,9 @@ The connection string used by the app will set `?sslmode=verify-full&sslrootcert
 ### G.6 Smoke-test the connection from `app-01`
 
 ```bash
-local$ ssh app
-app$  sudo apt install -y postgresql-client-17
-app$  PGPASSWORD='<APP_DB_PASSWORD>' psql \
+ssh app
+sudo apt install -y postgresql-client-17
+PGPASSWORD='<APP_DB_PASSWORD>' psql \
         "host=10.0.1.3 dbname=app_prod user=app_user sslmode=require" \
         -c "SELECT current_user, current_database();"
 # expected output:
@@ -910,10 +925,10 @@ If this fails: check `pg_hba.conf` (G.3), check the firewall (`sudo ufw status` 
 After every migration run, re-check the RLS coverage gate against prod via the same tunnel:
 
 ```bash
-local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
-local$ MIGRATE_DATABASE_URL='postgresql://migrate_user:<MIGRATE_DB_PASSWORD>@localhost:5432/app_prod?sslmode=require' \
+ssh -L 5432:10.0.1.3:5432 -N mgmt &
+MIGRATE_DATABASE_URL='postgresql://migrate_user:<MIGRATE_DB_PASSWORD>@localhost:5432/app_prod?sslmode=require' \
          pnpm check:rls
-local$ kill %1
+kill %1
 ```
 
 ---
@@ -944,28 +959,28 @@ If you used the standard `Ubuntu 24.04` image instead, run H.1 and H.2 below to 
 ### H.1 Install Docker (Coolify's prereq) — **skip if Coolify App image was selected**
 
 ```bash
-local$ ssh mgmt
-mgmt$  sudo install -m 0755 -d /etc/apt/keyrings
-mgmt$  sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+ssh mgmt
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
          -o /etc/apt/keyrings/docker.asc
-mgmt$  sudo chmod a+r /etc/apt/keyrings/docker.asc
-mgmt$  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
          https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
          | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-mgmt$  sudo apt update
-mgmt$  sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-mgmt$  sudo usermod -aG docker deploy
-mgmt$  exit
-local$ ssh mgmt                        # re-login so the docker group takes effect
-mgmt$  docker version                  # should print client + server versions
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker deploy
+exit
+ssh mgmt                        # re-login so the docker group takes effect
+docker version                  # should print client + server versions
 ```
 
 ### H.2 Install Coolify — **skip if Coolify App image was selected**
 
 ```bash
-mgmt$  sudo curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /tmp/coolify-install.sh
-mgmt$  less /tmp/coolify-install.sh    # read before piping to bash
-mgmt$  sudo bash /tmp/coolify-install.sh
+sudo curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /tmp/coolify-install.sh
+less /tmp/coolify-install.sh    # read before piping to bash
+sudo bash /tmp/coolify-install.sh
 ```
 
 Wait ~3 minutes. The script provisions ~10 containers (Postgres, Redis, the Coolify UI, …).
@@ -990,15 +1005,15 @@ Coolify deploys to remote servers via SSH. We add `app-01` as a "Server" in Cool
 On `mgmt-01`, generate an SSH keypair Coolify will use to reach `app-01`:
 
 ```bash
-mgmt$  sudo -u coolify ssh-keygen -t ed25519 -f /data/coolify/ssh/keys/app-01-key -N "" -C "coolify-deploy@mgmt-01"
-mgmt$  sudo cat /data/coolify/ssh/keys/app-01-key.pub
+sudo -u coolify ssh-keygen -t ed25519 -f /data/coolify/ssh/keys/app-01-key -N "" -C "coolify-deploy@mgmt-01"
+sudo cat /data/coolify/ssh/keys/app-01-key.pub
 ```
 
 Add the public key to `app-01`'s `deploy` user:
 
 ```bash
-local$ ssh app
-app$  echo '<paste-the-pubkey>' | sudo tee -a /home/deploy/.ssh/authorized_keys
+ssh app
+echo '<paste-the-pubkey>' | sudo tee -a /home/deploy/.ssh/authorized_keys
 ```
 
 In Coolify UI:
@@ -1044,13 +1059,13 @@ In Coolify UI:
 Generate a fresh `BETTER_AUTH_SECRET`:
 
 ```bash
-local$ openssl rand -base64 48
+openssl rand -base64 48
 ```
 
 ```powershell
 # If openssl.exe is on $env:Path (ships with Git for Windows), the line above works.
 # Otherwise use Node, which the dev toolchain already requires:
-local-ps> node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
 ```
 
 Paste these into Coolify's environment-variable form (each as a separate row):
@@ -1132,15 +1147,15 @@ Why **DNS only** (orange cloud off) initially: Coolify's Caddy issues Let's Encr
 Once propagation completes (15 min – a few hours):
 
 ```bash
-local$ dig +short dutyhive.com         # expect <APP_PUBLIC_IP>
-local$ dig +short app.dutyhive.com     # same
-local$ dig NS dutyhive.com +short      # expect the Cloudflare nameservers
+dig +short dutyhive.com         # expect <APP_PUBLIC_IP>
+dig +short app.dutyhive.com     # same
+dig NS dutyhive.com +short      # expect the Cloudflare nameservers
 ```
 
 ```powershell
-local-ps> Resolve-DnsName dutyhive.com -Type A      | Select-Object -ExpandProperty IPAddress
-local-ps> Resolve-DnsName app.dutyhive.com -Type A  | Select-Object -ExpandProperty IPAddress
-local-ps> Resolve-DnsName dutyhive.com -Type NS     | Select-Object -ExpandProperty NameHost
+Resolve-DnsName dutyhive.com -Type A      | Select-Object -ExpandProperty IPAddress
+Resolve-DnsName app.dutyhive.com -Type A  | Select-Object -ExpandProperty IPAddress
+Resolve-DnsName dutyhive.com -Type NS     | Select-Object -ExpandProperty NameHost
 ```
 
 ### I.5 Trigger TLS issuance
@@ -1193,14 +1208,14 @@ Wait until each record turns green ✔ in the Resend dashboard.
 ### J.5 Validate deliverability
 
 ```bash
-local$ curl -X POST https://api.resend.com/emails \
+curl -X POST https://api.resend.com/emails \
   -H "Authorization: Bearer <RESEND_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"from":"noreply@dutyhive.com","to":"<your personal mail>","subject":"DutyHive — domain verification test","html":"It works."}'
 ```
 
 ```powershell
-local-ps> Invoke-RestMethod -Method POST `
+Invoke-RestMethod -Method POST `
   -Uri "https://api.resend.com/emails" `
   -Headers @{ Authorization = "Bearer <RESEND_API_KEY>"; "Content-Type" = "application/json" } `
   -Body '{"from":"noreply@dutyhive.com","to":"<your personal mail>","subject":"DutyHive — domain verification test","html":"It works."}'
@@ -1246,17 +1261,17 @@ Beszel is a self-hosted lightweight metrics dashboard. The Hub runs on `mgmt-01`
 ### L.1 Install Beszel Hub on `mgmt-01`
 
 ```bash
-local$ ssh mgmt
-mgmt$  curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel_linux_amd64.tar.gz \
+ssh mgmt
+curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel_linux_amd64.tar.gz \
          | tar xz beszel
-mgmt$  sudo install -o beszel -g beszel beszel /usr/local/bin/beszel || (sudo useradd -r beszel && sudo install -o beszel -g beszel beszel /usr/local/bin/beszel)
-mgmt$  sudo install -d -o beszel -g beszel /opt/beszel
+sudo install -o beszel -g beszel beszel /usr/local/bin/beszel || (sudo useradd -r beszel && sudo install -o beszel -g beszel beszel /usr/local/bin/beszel)
+sudo install -d -o beszel -g beszel /opt/beszel
 ```
 
 Create a systemd unit:
 
 ```bash
-mgmt$  sudo tee /etc/systemd/system/beszel.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/beszel.service > /dev/null <<'EOF'
 [Unit]
 Description=Beszel monitoring hub
 After=network.target
@@ -1272,8 +1287,8 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
-mgmt$  sudo systemctl daemon-reload
-mgmt$  sudo systemctl enable --now beszel
+sudo systemctl daemon-reload
+sudo systemctl enable --now beszel
 ```
 
 Open `http://<MGMT_PUBLIC_IP>:8090` (use the SSH tunnel: `ssh -L 8090:localhost:8090 mgmt`) and create the admin account.
@@ -1283,10 +1298,10 @@ Open `http://<MGMT_PUBLIC_IP>:8090` (use the SSH tunnel: `ssh -L 8090:localhost:
 In the Beszel UI: **Add System → System → copy the install command shown**, e.g.:
 
 ```bash
-local$ ssh app
-app$  curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel-agent_linux_amd64.tar.gz | tar xz beszel-agent
-app$  sudo install -o root -g root beszel-agent /usr/local/bin/
-app$  sudo tee /etc/systemd/system/beszel-agent.service > /dev/null <<EOF
+ssh app
+curl -L https://github.com/henrygd/beszel/releases/latest/download/beszel-agent_linux_amd64.tar.gz | tar xz beszel-agent
+sudo install -o root -g root beszel-agent /usr/local/bin/
+sudo tee /etc/systemd/system/beszel-agent.service > /dev/null <<EOF
 [Unit]
 Description=Beszel agent
 After=network.target
@@ -1299,8 +1314,8 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-app$  sudo systemctl daemon-reload
-app$  sudo systemctl enable --now beszel-agent
+sudo systemctl daemon-reload
+sudo systemctl enable --now beszel-agent
 ```
 
 Repeat on `db-01`. Both should appear in the Hub UI within ~30 seconds with metrics streaming.
@@ -1320,8 +1335,8 @@ Nightly `pg_dump` of the production database, GPG-encrypted, shipped to the Stor
 On a **separate offline laptop or air-gapped USB** — _not_ on `db-01`:
 
 ```bash
-offline$ gpg --quick-gen-key 'infra-backups@dutyhive.com' rsa4096 sign,encrypt 0
-offline$ gpg --armor --export 'infra-backups@dutyhive.com' > infra-backups-public.asc
+gpg --quick-gen-key 'infra-backups@dutyhive.com' rsa4096 sign,encrypt 0
+gpg --armor --export 'infra-backups@dutyhive.com' > infra-backups-public.asc
 ```
 
 Save the **secret key** in your password manager (export with `gpg --armor --export-secret-keys` and treat it like the most valuable secret you have — losing it means losing all backups).
@@ -1329,10 +1344,10 @@ Save the **secret key** in your password manager (export with `gpg --armor --exp
 Copy the **public key only** to `db-01`:
 
 ```bash
-local$ scp infra-backups-public.asc db:/tmp/
-local$ ssh db
-db$    gpg --import /tmp/infra-backups-public.asc
-db$    gpg --list-keys
+scp infra-backups-public.asc db:/tmp/
+ssh db
+gpg --import /tmp/infra-backups-public.asc
+gpg --list-keys
 ```
 
 ### M.2 Configure SSH to the Storage Box from `db-01`
@@ -1340,33 +1355,33 @@ db$    gpg --list-keys
 Copy the backup key from F.2 to `db-01`:
 
 ```bash
-local$ scp ~/.ssh/infra_backup_ed25519 db:/home/deploy/.ssh/
-local$ ssh db
-db$    chmod 600 /home/deploy/.ssh/infra_backup_ed25519
+scp ~/.ssh/infra_backup_ed25519 db:/home/deploy/.ssh/
+ssh db
+chmod 600 /home/deploy/.ssh/infra_backup_ed25519
 ```
 
 ```powershell
-local-ps> scp $HOME\.ssh\infra_backup_ed25519 db:/home/deploy/.ssh/
+scp $HOME\.ssh\infra_backup_ed25519 db:/home/deploy/.ssh/
 ```
 
 Append a host alias to `~/.ssh/config` on db-01:
 
 ```bash
-db$  cat >> /home/deploy/.ssh/config <<'EOF'
+cat >> /home/deploy/.ssh/config <<'EOF'
 Host storagebox
   HostName u123456.your-storagebox.de
   User u123456
   IdentityFile ~/.ssh/infra_backup_ed25519
   Port 23
 EOF
-db$  chmod 600 /home/deploy/.ssh/config
-db$  ssh storagebox 'echo OK'      # accept the host key on first connect
+chmod 600 /home/deploy/.ssh/config
+ssh storagebox 'echo OK'      # accept the host key on first connect
 ```
 
 ### M.3 Backup script
 
 ```bash
-db$  sudo tee /usr/local/bin/pg-backup.sh > /dev/null <<'EOF'
+sudo tee /usr/local/bin/pg-backup.sh > /dev/null <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -1396,14 +1411,14 @@ REMOTE
 
 echo "Backup OK: $DUMP_FILE -> storagebox:backups/postgres/"
 EOF
-db$  sudo chmod 750 /usr/local/bin/pg-backup.sh
-db$  sudo chown root:root /usr/local/bin/pg-backup.sh
+sudo chmod 750 /usr/local/bin/pg-backup.sh
+sudo chown root:root /usr/local/bin/pg-backup.sh
 ```
 
 ### M.4 Schedule via systemd timer
 
 ```bash
-db$  sudo tee /etc/systemd/system/pg-backup.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/pg-backup.service > /dev/null <<'EOF'
 [Unit]
 Description=DutyHive nightly Postgres backup
 After=postgresql.service
@@ -1413,7 +1428,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/pg-backup.sh
 EOF
 
-db$  sudo tee /etc/systemd/system/pg-backup.timer > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/pg-backup.timer > /dev/null <<'EOF'
 [Unit]
 Description=Run pg-backup nightly at 03:00 UTC
 
@@ -1425,35 +1440,35 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-db$  sudo systemctl daemon-reload
-db$  sudo systemctl enable --now pg-backup.timer
-db$  sudo systemctl list-timers | grep pg-backup
+sudo systemctl daemon-reload
+sudo systemctl enable --now pg-backup.timer
+sudo systemctl list-timers | grep pg-backup
 ```
 
 ### M.5 Manual smoke + restore drill (DO THIS BEFORE GOING LIVE)
 
 ```bash
-db$  sudo systemctl start pg-backup.service     # run once now
-db$  sudo journalctl -u pg-backup -n 50               # confirm "Backup OK"
-db$  ssh storagebox 'ls -l backups/postgres/'         # confirm file lands
+sudo systemctl start pg-backup.service     # run once now
+sudo journalctl -u pg-backup -n 50               # confirm "Backup OK"
+ssh storagebox 'ls -l backups/postgres/'         # confirm file lands
 ```
 
 Restore drill — on a **scratch** box (or a temporary local Docker Postgres):
 
 ```bash
-local$ scp db:/tmp/<latest>.sql.gz.gpg ./
-local$ gpg --decrypt <latest>.sql.gz.gpg | gunzip | psql -h localhost -U postgres restore_test
-local$ psql -h localhost -U postgres restore_test -c "SELECT count(*) FROM \"user\";"
+scp db:/tmp/<latest>.sql.gz.gpg ./
+gpg --decrypt <latest>.sql.gz.gpg | gunzip | psql -h localhost -U postgres restore_test
+psql -h localhost -U postgres restore_test -c "SELECT count(*) FROM \"user\";"
 ```
 
 ```powershell
 # PowerShell can't pipe binary streams cleanly between gpg and psql. Decrypt
 # to a file first, then feed it into psql.
-local-ps> scp db:/tmp/<latest>.sql.gz.gpg .
-local-ps> gpg --decrypt --output dump.sql.gz <latest>.sql.gz.gpg
-local-ps> & 'C:\Program Files\Git\usr\bin\gzip.exe' -d dump.sql.gz   # or use 7z
-local-ps> psql -h localhost -U postgres restore_test -f dump.sql
-local-ps> psql -h localhost -U postgres restore_test -c 'SELECT count(*) FROM "user";'
+scp db:/tmp/<latest>.sql.gz.gpg .
+gpg --decrypt --output dump.sql.gz <latest>.sql.gz.gpg
+& 'C:\Program Files\Git\usr\bin\gzip.exe' -d dump.sql.gz   # or use 7z
+psql -h localhost -U postgres restore_test -f dump.sql
+psql -h localhost -U postgres restore_test -c 'SELECT count(*) FROM "user";'
 ```
 
 If row counts match production: backups are real. Document the drill date in `docs/guides/release-checklist.md`.
@@ -1463,7 +1478,7 @@ If row counts match production: backups are real. Document the drill date in `do
 Coolify stores its state in `/data/coolify`. Back it up to the Storage Box:
 
 ```bash
-mgmt$  sudo tee /usr/local/bin/coolify-backup.sh > /dev/null <<'EOF'
+sudo tee /usr/local/bin/coolify-backup.sh > /dev/null <<'EOF'
 #!/bin/bash
 set -euo pipefail
 TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
@@ -1473,7 +1488,7 @@ sudo -u deploy ssh storagebox "mkdir -p backups/coolify" || true
 sudo -u deploy scp "$ARCHIVE" storagebox:backups/coolify/
 shred -u "$ARCHIVE"
 EOF
-mgmt$  sudo chmod 750 /usr/local/bin/coolify-backup.sh
+sudo chmod 750 /usr/local/bin/coolify-backup.sh
 ```
 
 Schedule a weekly timer analogous to M.4 (`OnCalendar=Sun *-*-* 04:00:00 UTC`).
@@ -1497,7 +1512,7 @@ Mark these in `docs/guides/release-checklist.md` once each is green.
 - [ ] `ssh app 'echo OK'` succeeds (via mgmt jump).
 - [ ] `ssh db 'echo OK'` succeeds (via mgmt jump).
 - [ ] `ssh -o ConnectTimeout=5 deploy@<APP_PUBLIC_IP>` times out / refused.
-- [ ] `ssh -o ConnectTimeout=5 deploy@<DB_PUBLIC_IP>` times out / refused.
+- [ ] `db-01` has **no Public IPv4** in **Hetzner Console → Server details → Networking** (only Public IPv6 + private network).
 
 ### Auth + database
 
@@ -1553,19 +1568,19 @@ When every checkbox is green: **Foundation is live.** Tag `v0.1.0-foundation` in
 ### Routine: deploy a code change
 
 ```bash
-local$ git push origin main
+git push origin main
 # Coolify auto-triggers, builds, ships to app-01. Watch in Coolify UI.
 ```
 
 ### Routine: apply a Prisma migration to production
 
 ```bash
-local$ ssh -L 5432:10.0.1.3:5432 -N mgmt &
-local$ MIGRATE_DATABASE_URL='postgresql://migrate_user:<PW>@localhost:5432/app_prod?sslmode=require' \
+ssh -L 5432:10.0.1.3:5432 -N mgmt &
+MIGRATE_DATABASE_URL='postgresql://migrate_user:<PW>@localhost:5432/app_prod?sslmode=require' \
          pnpm --filter @dutyhive/db exec prisma migrate deploy
-local$ MIGRATE_DATABASE_URL='postgresql://migrate_user:<PW>@localhost:5432/app_prod?sslmode=require' \
+MIGRATE_DATABASE_URL='postgresql://migrate_user:<PW>@localhost:5432/app_prod?sslmode=require' \
          pnpm check:rls
-local$ kill %1
+kill %1
 ```
 
 (Windows / PowerShell: run the `ssh -L` line in its own window and close the window when done — see G.7 for the two-window pattern.)
@@ -1577,11 +1592,11 @@ local$ kill %1
 ### Incident: db-01 unreachable
 
 ```bash
-local$ ssh mgmt
-mgmt$  ping -c 2 10.0.1.3                 # private network up?
-local$ ssh db                             # SSH via mgmt jump
-db$    sudo systemctl status postgresql@17-main
-db$    sudo journalctl -u postgresql@17-main -n 100
+ssh mgmt
+ping -c 2 10.0.1.3                 # private network up?
+ssh db                             # SSH via mgmt jump
+sudo systemctl status postgresql@17-main
+sudo journalctl -u postgresql@17-main -n 100
 ```
 
 ### Incident: TLS cert renewal failed
@@ -1589,7 +1604,7 @@ db$    sudo journalctl -u postgresql@17-main -n 100
 Coolify renews via Caddy. If a domain stops resolving the cert won't renew.
 
 ```bash
-mgmt$  sudo docker logs $(sudo docker ps --filter name=coolify-proxy --format '{{.ID}}') | tail -100
+sudo docker logs $(sudo docker ps --filter name=coolify-proxy --format '{{.ID}}') | tail -100
 ```
 
 Common cause: Cloudflare proxy turned ON without ALPN-compatible cert mode. Set the affected record back to **DNS only** (orange cloud off).
