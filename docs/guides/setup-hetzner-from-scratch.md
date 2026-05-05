@@ -1039,13 +1039,14 @@ In Coolify UI:
 2. Inside the project: **+ New → Application → Public Repository** (or **Private** with the GitHub source).
 3. **Repository**: `lukasfend/DutyHive`.
 4. **Branch**: `main`.
-5. **Build pack**: `Dockerfile` (we'll add one) **OR** `Nixpacks` (auto-detect Next.js standalone).
+5. **Build pack**: `Dockerfile`.
 
-   For Foundation, use `Nixpacks` — it detects Next 16 standalone output and produces a working image without us writing a Dockerfile. Switch to a hand-rolled Dockerfile once the build matrix grows.
+   Use the committed [`Dockerfile`](../../Dockerfile) at the repo root — it produces a deterministic multi-stage build for the Next 16 standalone output and runs the Prisma generate step explicitly. Nixpacks auto-detect does not consistently traverse this monorepo's 11 workspace packages. See [`coolify-build.md`](coolify-build.md) for full Coolify settings.
 
 6. **Build settings**:
-   - **Build command**: `pnpm install --frozen-lockfile && pnpm build`
-   - **Start command**: `node apps/web/.next/standalone/apps/web/server.js`
+   - **Dockerfile path**: `Dockerfile` (default)
+   - **Build context**: `.` (repo root)
+   - **Start command**: _(empty — the Dockerfile's `CMD` runs `node apps/web/server.js`)_
    - **Port**: `3000`
 7. **Server**: `app-01`.
 8. **Environment variables** — paste the production env (Phase H.7 below).

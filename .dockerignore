@@ -1,0 +1,54 @@
+# Anything not needed inside the Docker build context.
+# Keep this list aligned with .gitignore where it makes sense.
+
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/coverage
+**/*.tsbuildinfo
+
+# Local env files — production env comes from Coolify at runtime.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Tests / CI scaffolding
+playwright-report
+test-results
+.vitest
+
+# VCS + IDE
+.git
+.gitignore
+.github
+.vscode
+.husky
+.idea
+
+# Docs we DON'T need in the build context. Keep docs/legal/ — Next's
+# outputFileTracingIncludes pulls those .de.md files into the standalone bundle.
+docs/architecture
+docs/branding
+docs/guides
+docs/quality
+docs/README.md
+
+# Tooling configs that don't affect the build
+.editorconfig
+.prettierignore
+.prettierrc.json
+commitlint.config.ts
+.lintstagedrc.cjs
+
+# Logs / OS detritus
+**/*.log
+.DS_Store
+Thumbs.db
+
+# Large-but-irrelevant
+README.md
+LICENSE
