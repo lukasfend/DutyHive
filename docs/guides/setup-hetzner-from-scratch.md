@@ -1186,12 +1186,25 @@ Better Auth sends verification emails via SMTP in dev (Mailpit). Production swit
 
 ### J.2 Add the records in Cloudflare
 
-| Type  | Name                | Content                                                      | Notes                             |
-| ----- | ------------------- | ------------------------------------------------------------ | --------------------------------- |
-| `TXT` | `@`                 | `v=spf1 include:amazonses.com -all`                          | Resend uses Amazon SES on backend |
-| `TXT` | `resend._domainkey` | `<long DKIM value from Resend dashboard>`                    | DKIM signing                      |
-| `TXT` | `_dmarc`            | `v=DMARC1; p=quarantine; rua=mailto:postmaster@dutyhive.com` | DMARC reporting                   |
-| `MX`  | `send`              | `feedback-smtp.eu-west-1.amazonses.com` (priority 10)        | Resend bounce/complaint relay     |
+> ⚠️ **SPF-merge rule.** DNS allows exactly **one** SPF (`TXT v=spf1 …`) record
+> per hostname. If Phase K (Cloudflare Email Routing) has already been
+> activated, the apex `TXT @` is already `v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com -all`
+> — **do not overwrite it** with the Resend-only value below. If Phase K is
+> planned but not yet active, set the merged value here directly:
+>
+> ```
+> v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com -all
+> ```
+>
+> Order of `include:` entries is not semantically relevant. Phase K's K.2
+> already documents this merge in the other direction.
+
+| Type  | Name                | Content                                                      | Notes                                                                       |
+| ----- | ------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `TXT` | `@`                 | `v=spf1 include:amazonses.com -all`                          | Resend uses Amazon SES on backend. **Merge with K.2** if Phase K is active. |
+| `TXT` | `resend._domainkey` | `<long DKIM value from Resend dashboard>`                    | DKIM signing                                                                |
+| `TXT` | `_dmarc`            | `v=DMARC1; p=quarantine; rua=mailto:postmaster@dutyhive.com` | DMARC reporting                                                             |
+| `MX`  | `send`              | `feedback-smtp.eu-west-1.amazonses.com` (priority 10)        | Resend bounce/complaint relay                                               |
 
 Cloudflare → DNS → add each one. Save. Resend's verification picks up the records within a few minutes.
 
