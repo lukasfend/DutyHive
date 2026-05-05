@@ -7,7 +7,7 @@
 
 - `architecture/` — System overview, data model, RLS strategy, audit log, ADRs
 - `quality/` — Non-medical-device statement, intended-purpose register, risk register, software development plan, release procedure, versioning, change log
-- `guides/` — Dev guide, deploy guide, Hetzner-from-scratch, env vars, release checklist, Keycloak migration path, DNS migration
+- `guides/` — Dev guide, env vars, Hetzner-from-scratch, Coolify build, Coolify secrets, Sentry setup, Trigger.dev setup, release checklist, deploy guide, Keycloak migration path, DNS migration
 - `legal/` — Impressum, Datenschutz, AGB drafts (Austrian law) + DPA checklist
 - `branding/` — Placeholder logo, color tokens, naming conventions
 
@@ -31,6 +31,10 @@ This documentation is filled in across the seven Foundation phases (see project 
 | `guides/deploy-guide.md`               | 6                                              |
 | `guides/setup-hetzner-from-scratch.md` | 6                                              |
 | `guides/env-guide.md`                  | 1 (initial), 5 (final)                         |
+| `guides/coolify-build.md`              | 6                                              |
+| `guides/coolify-secrets.md`            | 6                                              |
+| `guides/sentry-setup.md`               | 6                                              |
+| `guides/trigger-setup.md`              | 6                                              |
 | `guides/release-checklist.md`          | 6                                              |
 | `guides/keycloak-migration-path.md`    | 7                                              |
 | `guides/dns-migration.md`              | 6                                              |
