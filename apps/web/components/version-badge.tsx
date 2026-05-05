@@ -1,16 +1,11 @@
 /**
  * VersionBadge — unobtrusive version + build SHA indicator.
  *
- * Foundation Phase 1.5: lives in apps/web/components for now. Phase 3 will
- * move this into `@dutyhive/ui` so all subdomain shells can render it
- * consistently.
- *
  * Format: `vX.Y.Z[-channel.n] · build <short-sha>` (build hidden if no SHA).
  *
- * Why visible: transparency for users (they can quote a version when reporting
- * bugs), debuggability for the principal (visible at a glance which build is
- * running where), and a soft form of build-integrity indication. See
- * `docs/quality/versioning.md`.
+ * Why visible: transparency for users (quotable in bug reports), debuggability
+ * (visible at a glance which build is running where), and a soft form of
+ * build-integrity indication. See `docs/quality/versioning.md`.
  */
 
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.0.0';

@@ -3,11 +3,12 @@
 > **Pre-alpha** · Solo dev (Vienna, AT) · Self-hosted on Hetzner · Working name (rebrand-flexible)
 
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange)](#)
-[![Phase](https://img.shields.io/badge/phase-Foundation%201%2F7-blue)](#foundation-phase-status)
+[![Foundation](https://img.shields.io/badge/foundation-5%2F7%20done-success)](#foundation-phase-status)
+[![Active](https://img.shields.io/badge/in%20progress-Phase%206-blue)](#foundation-phase-status)
 [![Node](https://img.shields.io/badge/node-22.x-43853d?logo=node.js&logoColor=white)](.nvmrc)
 [![pnpm](https://img.shields.io/badge/pnpm-10-f69220?logo=pnpm&logoColor=white)](.npmrc)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.base.json)
-[![Next.js](https://img.shields.io/badge/next.js-15-black?logo=next.js&logoColor=white)](apps/web/package.json)
+[![Next.js](https://img.shields.io/badge/next.js-16-black?logo=next.js&logoColor=white)](apps/web/package.json)
 [![Tailwind](https://img.shields.io/badge/tailwind-4-38bdf8?logo=tailwindcss&logoColor=white)](apps/web/postcss.config.mjs)
 [![Postgres](https://img.shields.io/badge/postgres-17-336791?logo=postgresql&logoColor=white)](infra/docker/docker-compose.dev.yml)
 [![License](https://img.shields.io/badge/license-proprietary-lightgrey)](#license)
@@ -28,7 +29,7 @@ DutyHive is a SaaS platform offering tools for shift work, primarily targeting h
 
 ```
 dutyhive/
-├─ apps/web/                # Single Next.js 15 app — middleware routes all subdomains
+├─ apps/web/                # Single Next.js 16 app — `proxy.ts` routes all subdomains
 ├─ packages/
 │  ├─ config/               # @dutyhive/config — brand identity + subdomain map
 │  ├─ env/                  # @dutyhive/env — Zod-validated env (server/client split)
@@ -58,7 +59,7 @@ Strict layering: nothing in `packages/*` may import from `apps/*`.
 
 | Layer     | Choice                                                                                 |
 | --------- | -------------------------------------------------------------------------------------- |
-| Framework | Next.js 15 (App Router) + React 19                                                     |
+| Framework | Next.js 16 (App Router, Turbopack) + React 19                                          |
 | Language  | TypeScript strict, `noUncheckedIndexedAccess`                                          |
 | Styling   | Tailwind 4 (CSS-first) + shadcn/ui + design tokens                                     |
 | ORM / DB  | Prisma 6 + Postgres 17 + RLS                                                           |
@@ -80,12 +81,12 @@ See [`docs/architecture/overview.md`](docs/architecture/overview.md) for the sys
 ## Foundation phase status
 
 - [x] **Phase 1** — Local skeleton (monorepo, Next.js, packages, tooling)
-- [ ] **Phase 1.5** — Quality scaffold (non-MD statement, intended-purpose register, risk register, SDP, version display, issue templates)
-- [ ] **Phase 2** — DB & Auth (Postgres, Prisma, RLS, Better Auth, audit log)
-- [ ] **Phase 3** — Subdomain routing & UI shell (proxy, route groups, shadcn, i18n)
-- [ ] **Phase 4** — Marketing site (landing, newsletter, legal pages)
-- [ ] **Phase 5** — Background, observability, polish (Trigger.dev, Sentry, logger, PWA, tests)
-- [ ] **Phase 6** — Provisioning & first deploy (Hetzner, Coolify, Cloudflare, Resend)
+- [x] **Phase 1.5** — Quality scaffold (non-MD statement, intended-purpose register, risk register, SDP, version display, issue templates)
+- [x] **Phase 2** — DB & Auth (Postgres, Prisma, RLS, Better Auth, audit log)
+- [x] **Phase 3** — Subdomain routing & UI shell (proxy, route groups, shadcn, i18n)
+- [x] **Phase 4** — Marketing site (landing, newsletter, legal pages)
+- [x] **Phase 5** — Background, observability, polish (Trigger.dev, Sentry, logger, PWA, tests)
+- [ ] **Phase 6** — Provisioning & first deploy (Hetzner, Coolify, Cloudflare, Resend) — _in progress: Hetzner runbook ready, Coolify install live, first deploy pending_
 - [ ] **Phase 7** — Observability & doc polish (Beszel, backups, docs final, tag v0.1.0-foundation)
 
 ## Quickstart
@@ -206,7 +207,7 @@ Same auth and accounts across all three. Marketing site at the apex `dutyhive.co
 
 **Stack:** Next.js **16** (App Router, Turbopack) · React 19 · TypeScript strict + `noUncheckedIndexedAccess` · Tailwind **4.2** · shadcn/ui · pnpm 10 + turborepo · Better Auth (with `organization` plugin) · Prisma 6 + Postgres 17 + Row-Level Security · Resend · Trigger.dev v3 Cloud · Sentry EU · next-intl · Serwist (PWA) · Vitest + Playwright · pino · Husky + lint-staged + commitlint.
 
-> Plan-vs-implementation deltas (Next.js 15 → 16): the `middleware.ts` file convention is renamed to **`proxy.ts`**; `next lint` is removed in favor of plain `eslint`; the `eslint` block is removed from `next.config.ts`.
+> Next.js 16 conventions in this repo (delta from the original Next 15 plan): the `middleware.ts` file convention is renamed to **`proxy.ts`**; `next lint` is removed in favor of plain `eslint`; the `eslint` block is removed from `next.config.ts`.
 
 **Hosting:** Hetzner Falkenstein. Three VPSes via Coolify: `mgmt-01` CX22 (Coolify + Beszel hub), `app-01` CPX21 (Next.js), `db-01` CPX21 (Postgres, internal-only listener). Plus Hetzner Storage Box BX11 (backups) + Object Storage (assets). DNS planned to migrate to Cloudflare (registrar stays at Vercel). Beszel for metrics.
 
@@ -247,4 +248,4 @@ Every authenticated server action goes through `withAuthContext(req, fn)` (`pack
 - `README.md` — this file (project intro + this `/compact` section + the compaction prompt above)
 - `docs/architecture/adr/` — load relevant ADR(s) when changing architectural choices
 
-**Current phase:** `Foundation Phase 1.5/7 — quality scaffold`. Last touched: 2026-05-04. Next item: finish Phase 1.5 verification + commit, then start Phase 2 (DB & Auth: Prisma schema, RLS policies, Better Auth org plugin, audit-log helper).
+**Current phase:** `Foundation Phase 5 done · Phase 6 in progress` (Provisioning & first deploy — Hetzner runbook ready, Coolify install live, first deploy pending). Last touched: 2026-05-05. Next item: complete Phase 6 deploy gates (production `Dockerfile`, Sentry/Trigger.dev wiring, release-checklist), then Phase 7 (Beszel, backups, doc polish, tag `v0.1.0-foundation`).

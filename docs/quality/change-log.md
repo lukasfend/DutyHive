@@ -4,16 +4,20 @@
 
 ## [Unreleased]
 
-### Added
-
-- Phase 1.5 quality scaffold: `docs/quality/` directory with non-medical-device statement, intended-purpose register, risk register, software development plan, release procedure, and versioning policy.
-- Machine-readable intended-purpose declarations in `packages/config/src/intended-purpose.ts`.
-- `<VersionBadge />` component in `@dutyhive/ui` and version injection via `next.config.ts`.
-- GitHub issue templates: bug report, feature request, security issue.
-
 ### Changed
 
-- Repo positioning: explicitly out-of-scope for EU MDR. Architectural guardrails documented to prevent accidental medical-device classification.
+- README phase markers updated to reflect actual state: Phase 5 done · Phase 6 in progress. `Next.js` badge bumped from 15 to 16. `<VersionBadge />` and Better Auth `organization` plugin comments scrubbed of stale phase references. `docs/README.md` filled-in-phase column for `release-checklist.md` corrected from 7 to 6.
+
+### Added (Phase 6 deploy gates)
+
+- Production `Dockerfile` (Next.js 16 standalone, multi-stage build) at repo root.
+- `apps/web/app/api/health/route.ts` — minimal `{ ok: true }` health endpoint for Coolify healthcheck.
+- `docs/guides/release-checklist.md` — pre-tag verification matrix (resolves three dangling links in the Hetzner runbook).
+- `docs/guides/coolify-build.md` — Coolify build settings, healthcheck path, ENV mounting.
+- `docs/guides/coolify-secrets.md` — secrets storage, rotation cadence, leak-response procedure.
+- `docs/guides/sentry-setup.md` — EU-region Sentry project + DSN wiring.
+- `docs/guides/trigger-setup.md` — Trigger.dev project ref + secret key wiring.
+- SPF-merge note in `docs/guides/setup-hetzner-from-scratch.md` Phase J for Resend × Cloudflare Email Routing.
 
 ---
 
@@ -155,6 +159,21 @@
 
 - Defence-in-depth RLS on `organization`/`member`/`invitation` deferred. Better Auth's organization plugin enforces tenant access at the plugin layer for now; we will add policies in a later phase once we have the right pattern (likely a separate connection pool with an "auth-bypass" role).
 - Schema-per-worker test isolation deferred. Phase 2 runs RLS tests sequentially. Switch to true per-worker schemas once test count justifies the complexity.
+
+---
+
+## v0.1.0-foundation.1.5 — 2026-05-04 — Phase 1.5: Quality scaffold
+
+### Added
+
+- `docs/quality/` directory: non-medical-device statement, intended-purpose register, risk register, software development plan, release procedure, and versioning policy.
+- Machine-readable intended-purpose declarations in `packages/config/src/intended-purpose.ts`.
+- `<VersionBadge />` component (`apps/web/components/version-badge.tsx`) and version injection via `next.config.ts`.
+- GitHub issue templates: bug report, feature request, security issue.
+
+### Changed
+
+- Repo positioning: explicitly out-of-scope for EU MDR. Architectural guardrails documented to prevent accidental medical-device classification.
 
 ---
 

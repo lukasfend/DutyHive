@@ -31,7 +31,7 @@ This documentation is filled in across the seven Foundation phases (see project 
 | `guides/deploy-guide.md`               | 6                                              |
 | `guides/setup-hetzner-from-scratch.md` | 6                                              |
 | `guides/env-guide.md`                  | 1 (initial), 5 (final)                         |
-| `guides/release-checklist.md`          | 7                                              |
+| `guides/release-checklist.md`          | 6                                              |
 | `guides/keycloak-migration-path.md`    | 7                                              |
 | `guides/dns-migration.md`              | 6                                              |
 | `legal/*`                              | 4 (drafts), 7 (final drafts)                   |

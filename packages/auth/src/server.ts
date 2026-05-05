@@ -111,7 +111,7 @@ export const auth = betterAuth({
   plugins: [
     organization({
       // Foundation: stick with the plugin's default owner/admin/member roles.
-      // A custom ability matrix lands when product features arrive (Phase 5+).
+      // A custom ability matrix lands when products ship (post-Foundation).
     }),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
